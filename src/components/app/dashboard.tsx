@@ -97,9 +97,13 @@ function byEvent(tasks: DashTask[]) {
 }
 
 function TaskList({ tasks, today }: { tasks: DashTask[]; today: string }) {
-  const [tab, setTab] = useState<Tab>("overdue");
-  const [mine, setMine] = useState(true);
   const weekEnd = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
+  // Open on something to do: your own tasks if you have any, and the first list that is not empty.
+  const [mine, setMine] = useState(() => tasks.some((t) => t.mine));
+  const [tab, setTab] = useState<Tab>(() => {
+    const own = tasks.some((t) => t.mine) ? tasks.filter((t) => t.mine) : tasks;
+    return own.some((t) => t.due < today) ? "overdue" : own.some((t) => t.due >= today && t.due <= weekEnd) ? "week" : "upcoming";
+  });
   const pool = mine ? tasks.filter((t) => t.mine) : tasks;
   const groups: Record<Tab, DashTask[]> = useMemo(
     () => ({

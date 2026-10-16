@@ -396,8 +396,21 @@ async function approvals(ctx: Ctx) {
     for (const name of ["send_speaker_outreach", "send_sponsor_outreach", "request_vendor_quotes", "request_budget_approval", "submit_to_faculty", "push_calendar"]) {
       await findTool(name)!.run({ event_id: eventId, run_id: run.id }, user).catch(() => null); // The failed step is already in the trace.
     }
+    // The team's first two meetings, on Google Meet (the link opens a new call).
+    const at = (days: number, time: string) => `${new Date(Date.now() + 8 * 3600_000 + days * 86_400_000).toISOString().slice(0, 10)}T${time}`;
+    for (const m of [
+      { template: "kickoff", title: "Kick-off", starts_at: at(1, "20:00"), duration_min: 45 },
+      { template: "weekly", title: "Weekly sync", starts_at: at(8, "20:30"), duration_min: 30 },
+    ]) {
+      await findTool("schedule_meeting")!.run({ event_id: eventId, run_id: run.id, ...m, meeting_url: "https://meet.google.com/new" }, user).catch(() => null);
+    }
   });
   ctx.done.add("approvals");
+  // A demo society also gets sample registrations and emails, so every tab has something to show.
+  if (user.email?.endsWith("@movents.test")) {
+    const { demoExtras } = await import("../../demo");
+    await demoExtras(user, eventId, { trail: false }).catch(() => null);
+  }
 }
 
 async function finish(ctx: Ctx, issues: Issue[]) {

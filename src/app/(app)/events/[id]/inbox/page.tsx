@@ -51,6 +51,7 @@ export default async function InboxPage({ params }: { params: Promise<{ id: stri
       />
       <EventInbox
         eventId={id}
+        drafts={drafts.length}
         mailbox={mailbox ? { address: mailbox.address, label: mailbox.label } : null}
         suggestion={`${slug}@movents.example`}
         mails={rows.map((r) => ({ ...r, group: mailGroup(r.kind), sent_at: iso(r.sent_at), created_at: iso(r.created_at)! }))}

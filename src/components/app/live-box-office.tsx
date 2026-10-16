@@ -53,7 +53,7 @@ export function LiveBoxOffice() {
         <AnimatePresence>
           {runs.map((run) => {
             const last = run.steps.at(-1);
-            const info = last ? stepInfo(last.tool) : null;
+            const info = last ? stepInfo(last.tool, last.name) : null;
             const done = run.steps.filter((s) => s.status !== "running").length;
             const title = run.title ?? run.prompt.replace(/^plan (a|an)\s+/i, "").slice(0, 60);
             return (
@@ -92,7 +92,7 @@ export function LiveBoxOffice() {
           })}
         </AnimatePresence>
       </ul>
-      <AssistantCursor x={pos.x} y={pos.y} chip={runs.length > 1 ? `planning ${runs.length} events` : "planning"} />
+      <AssistantCursor x={pos.x} y={pos.y} chip={runs.length > 1 ? `planning ${runs.length} events` : "planning"} name={runs.some((r) => r.source === "gemini") ? "Gemini" : "AI assistant"} />
     </>
   );
 }

@@ -39,13 +39,27 @@ const STEP: { match: RegExp; seg: string; doing: string }[] = [
   { match: /email/, seg: "inbox", doing: "drafting emails" },
 ];
 
-export function stepInfo(tool: string) {
+/** Gemini's own steps name the agent ("Speaker agent: ...") and use google_search, so match on the name too. */
+const AGENT: { match: RegExp; seg: string; doing: string }[] = [
+  { match: /speaker agent/i, seg: "speakers", doing: "searching the web for speakers" },
+  { match: /budget agent.*(supplier|price)/i, seg: "suppliers", doing: "searching supplier prices" },
+  { match: /budget agent/i, seg: "budget", doing: "balancing the budget" },
+  { match: /sponsor agent/i, seg: "sponsors", doing: "finding sponsors" },
+  { match: /proposal agent/i, seg: "outputs", doing: "writing the proposal" },
+  { match: /promotion agent/i, seg: "promotion", doing: "writing the marketing kit" },
+  { match: /risk agent/i, seg: "risks", doing: "weighing the risks" },
+  { match: /checker/i, seg: "", doing: "checking against the SOP" },
+  { match: /re-plan/i, seg: "", doing: "re-planning" },
+  { match: /planner/i, seg: "", doing: "planning" },
+];
+
+export function stepInfo(tool: string, name = "") {
   const k = toolKey(tool);
-  return STEP.find((s) => s.match.test(k)) ?? { seg: "", doing: "working" };
+  return STEP.find((s) => s.match.test(k)) ?? AGENT.find((a) => a.match.test(name)) ?? { seg: "", doing: "working" };
 }
 
 /** The assistant's cursor: tomato pointer, ink name tag, little robot face, optional status chip. */
-export function AssistantCursor({ x, y, chip, clickKey }: { x: number; y: number; chip?: string | null; clickKey?: string | number }) {
+export function AssistantCursor({ x, y, chip, clickKey, name = "AI assistant", thought }: { x: number; y: number; chip?: string | null; clickKey?: string | number; name?: string; thought?: string | null }) {
   return (
     <motion.div className="pointer-events-none fixed left-0 top-0 z-[70]" animate={{ x, y }} transition={{ type: "spring", stiffness: 120, damping: 18, mass: 0.8 }}>
       <AnimatePresence>
@@ -67,7 +81,7 @@ export function AssistantCursor({ x, y, chip, clickKey }: { x: number; y: number
               <circle cx="9.8" cy="9.1" r="0.9" fill="#3ee0c5" />
             </svg>
           </span>
-          AI assistant
+          {name}
         </span>
         <AnimatePresence mode="wait">
           {chip && (
@@ -77,6 +91,21 @@ export function AssistantCursor({ x, y, chip, clickKey }: { x: number; y: number
           )}
         </AnimatePresence>
       </div>
+      <AnimatePresence mode="wait">
+        {thought && (
+          <motion.div
+            key={thought}
+            initial={{ opacity: 0, y: -4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.25 }}
+            className="ml-4 mt-1.5 max-w-72 rounded-xl rounded-tl-sm border-[1.5px] border-ink bg-card px-2.5 py-1.5 text-[11.5px] leading-snug text-ink shadow-[2px_2px_0_0_#161514]"
+          >
+            <span className="mono-label mr-1 text-[9px] text-tomato">Thinking</span>
+            {thought}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -192,7 +221,10 @@ export function LiveBuild({ eventId }: { eventId: string }) {
 
   const steps = run?.steps ?? [];
   const current = steps.at(-1) ?? null;
-  const info = current ? stepInfo(current.tool) : null;
+  const info = current ? stepInfo(current.tool, current.name) : null;
+  const who = run?.source === "gemini" ? "Gemini" : "Your assistant";
+  // The latest thing it concluded, shown as its reasoning next to the cursor.
+  const thought = [...steps].reverse().find((s) => s.status !== "running" && s.summary)?.summary?.replace(/\s+/g, " ").slice(0, 140) ?? null;
   const live = run && run.status === "running";
   const done = run && run.status !== "running";
   const seg = path.split(`/events/${eventId}`)[1]?.replace(/^\//, "").split("/")[0] ?? "";
@@ -242,7 +274,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
             {live && <span className="absolute inline-flex size-full animate-ping rounded-full bg-tomato opacity-60" />}
             <span className={cn("relative inline-flex size-2.5 rounded-full", live ? "bg-tomato" : "bg-[#46a758]")} />
           </span>
-          <span className="text-sm font-semibold text-ink">{live ? "Your assistant is building this project" : "Your assistant finished"}</span>
+          <span className="text-sm font-semibold text-ink">{live ? `${who} is building this project` : `${who} finished`}</span>
           {live && info && <span className="hidden text-sm text-muted-foreground sm:inline">{info.doing}…</span>}
           <span className="ml-auto font-mono text-[11px] text-muted-foreground">{doneCount} steps</span>
           {live && (
@@ -285,7 +317,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
         </AnimatePresence>
       </div>
 
-      {live && <AssistantCursor x={pos.x} y={pos.y} chip={info?.doing ?? "working"} clickKey={current?.id} />}
+      {live && <AssistantCursor x={pos.x} y={pos.y} chip={info?.doing ?? "working"} clickKey={current?.id} name={run.source === "gemini" ? "Gemini" : "AI assistant"} thought={thought} />}
       {burst && <Sparkles x={burst.x} y={burst.y} k={burst.k} />}
     </div>
   );

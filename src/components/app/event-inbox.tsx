@@ -88,7 +88,7 @@ const initials = (s: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("");
 
-export function EventInbox({ eventId, mailbox, suggestion, mails }: { eventId: string; mailbox: { address: string; label: string | null } | null; suggestion: string; mails: InboxMail[] }) {
+export function EventInbox({ eventId, mailbox, suggestion, mails, drafts = 0 }: { eventId: string; mailbox: { address: string; label: string | null } | null; suggestion: string; mails: InboxMail[]; drafts?: number }) {
   const [filter, setFilter] = useState<Group | "all">("all");
   const [sel, setSel] = useState<string | undefined>(mails[0]?.id);
 
@@ -142,7 +142,9 @@ export function EventInbox({ eventId, mailbox, suggestion, mails }: { eventId: s
         })}
       </div>
 
-      {mails.length === 0 ? (
+      {mails.length === 0 && drafts > 0 ? (
+        <p className="rounded-xl border-[1.5px] border-dashed border-ink/20 px-4 py-3 text-sm text-muted-foreground">Sent emails show up here, with opens and replies, once you send the drafts above.</p>
+      ) : mails.length === 0 ? (
         <StageEmpty title="No mail yet" />
       ) : (
         <div className="grid overflow-hidden rounded-xl border-[1.5px] border-ink bg-card shadow-[2px_2px_0_0_#161514] lg:h-[72vh] lg:grid-cols-[360px_1fr]">

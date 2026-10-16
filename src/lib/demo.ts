@@ -127,7 +127,7 @@ export async function seedDemoEvents(userId: string) {
       await T.generateOpsPack(ev.id);
       await T.writeProposalText(ev.id, s.proposal);
       await generateKit(ev.id, { withImages: false });
-      await sampleInboxAndMeetings(user, ev.id);
+      await demoExtras(user, ev.id);
       if (s.ask) {
         const mate = await one<import("./types").User>("SELECT u.id, u.name, u.email, u.phone, m.society_id, m.role, m.department FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.society_id = $1 AND u.name = $2", [user.society_id, s.ask.who]);
         if (mate) {
@@ -155,6 +155,32 @@ export async function seedDemoEvents(userId: string) {
  * past kick-off with minutes and action items that became tasks, and the
  * next weekly sync.
  */
+/** Sample registrations, and for the seeded sample events also a sent-email trail and meetings. */
+export async function demoExtras(user: import("./types").User, eventId: string, opts: { trail?: boolean } = {}) {
+  await sampleRegistrations(eventId);
+  if (opts.trail !== false) await sampleInboxAndMeetings(user, eventId);
+}
+
+const FIRST = ["Aiman", "Nur Aisyah", "Jia Hui", "Arjun", "Mei Xin", "Haziq", "Siti", "Wei Lun", "Kavya", "Daniel", "Farah", "Jun Hao", "Priyanka", "Amirul", "Hui Min", "Ravi", "Alya", "Zhi Wei", "Nadia", "Marcus", "Iman", "Yi Ling", "Harith", "Sharmila"];
+const LAST = ["Tan", "Rahman", "Lim", "Kumar", "Wong", "Ismail", "Lee", "Abdullah", "Ng", "Raj", "Chong", "Hassan", "Ong", "Nair", "Yusof", "Goh"];
+
+/** Sample sign-ups (placeholder .example emails), so Registration and Door check-in have people to show. */
+async function sampleRegistrations(eventId: string) {
+  const ev = await one<{ pax: number }>("SELECT pax FROM events WHERE id = $1", [eventId]);
+  const have = await one<{ n: number }>("SELECT count(*)::int AS n FROM rsvps WHERE event_id = $1", [eventId]);
+  if (!ev || Number(have?.n) > 0) return;
+  const { ticketCode } = await import("./agent/tools");
+  const count = Math.min(48, Math.max(12, Math.round(ev.pax * 0.35)));
+  const diets = [null, null, null, null, "Vegetarian", null, "No nuts", null, null, "Vegan"];
+  for (let i = 0; i < count; i++) {
+    const name = `${FIRST[i % FIRST.length]} ${LAST[(i * 7) % LAST.length]}`;
+    const email = `${name.toLowerCase().replace(/[^a-z]+/g, ".")}.${i}@student.example`;
+    await query("INSERT INTO rsvps (id, event_id, name, email, source, status, ticket, checked_in, dietary, created_at) VALUES ($1, $2, $3, $4, 'movents', $5, $6, false, $7, now() - ($8 || ' hours')::interval)", [
+      id("rsv"), eventId, name, email, i % 17 === 16 ? "waitlist" : "going", ticketCode(), diets[i % diets.length], String((count - i) * 3),
+    ]);
+  }
+}
+
 async function sampleInboxAndMeetings(user: import("./types").User, eventId: string) {
   const { emailShell } = await import("./integrations/email");
   const { fmtDate } = await import("./appurl");
@@ -204,7 +230,7 @@ async function sampleInboxAndMeetings(user: import("./types").User, eventId: str
     date: iso(day(-4)),
     time: "20:00",
     duration_min: 45,
-    meeting_url: "https://meet.google.com/demo-kickoff",
+    meeting_url: "https://meet.google.com/new",
     attendees,
     agenda: ["Goals and audience", "Budget cap and funding", "Speakers shortlist", "Who owns what"],
   });
@@ -230,7 +256,7 @@ async function sampleInboxAndMeetings(user: import("./types").User, eventId: str
     date: iso(day(3)),
     time: "20:30",
     duration_min: 30,
-    meeting_url: "https://meet.google.com/demo-weekly",
+    meeting_url: "https://meet.google.com/new",
     attendees,
     agenda: ["Venue confirmed?", "Speaker replies", "Sponsor replies", "Promotion plan"],
   });
