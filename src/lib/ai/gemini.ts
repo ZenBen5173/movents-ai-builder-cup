@@ -104,7 +104,7 @@ async function authHeaders(provider: Provider): Promise<Record<string, string>> 
 
 export function modelChain(first?: string) {
   const primary = process.env.GEMINI_MODEL || "gemini-3.5-flash";
-  const fallbacks = (process.env.GEMINI_FALLBACK_MODELS ?? "gemini-3-flash-preview,gemini-3.5-flash-lite").split(",").map((m) => m.trim()).filter(Boolean);
+  const fallbacks = (process.env.GEMINI_FALLBACK_MODELS ?? "gemini-3-flash-preview,gemini-3.5-flash-lite").split(/[,;]/).map((m) => m.trim()).filter(Boolean);
   return [...new Set([first, primary, ...fallbacks].filter((m): m is string => Boolean(m)))];
 }
 

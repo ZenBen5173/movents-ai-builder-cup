@@ -69,7 +69,7 @@ say "Build and deploy to Cloud Run ($REGION)"
 gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet \
   --service-account "$SA" --allow-unauthenticated \
   --cpu 1 --memory 1Gi --no-cpu-throttling --min-instances 0 --max-instances 3 --concurrency 80 --timeout 300 \
-  --set-env-vars "APP_URL=${URL},DEMO_MODE=1,GEMINI_PROVIDER=vertex,GOOGLE_CLOUD_PROJECT=${PROJECT},VERTEX_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash,EVENT_TIMEZONE=Asia/Kuala_Lumpur,DATABASE_POOL_MAX=5" \
+  --set-env-vars "APP_URL=${URL},DEMO_MODE=1,GEMINI_PROVIDER=vertex,GOOGLE_CLOUD_PROJECT=${PROJECT},VERTEX_LOCATION=global,GEMINI_MODEL=gemini-3-flash-preview,GEMINI_FALLBACK_MODELS=gemini-3.5-flash-lite;gemini-3.5-flash,EVENT_TIMEZONE=Asia/Kuala_Lumpur,DATABASE_POOL_MAX=5" \
   --set-secrets "GEMINI_API_KEY=movents-gemini-key:latest,DATABASE_URL=movents-database-url:latest,APP_SECRET=movents-app-secret:latest,CRON_SECRET=movents-cron-secret:latest"
 
 say "Daily automations (Cloud Scheduler, 09:00 Malaysia time)"

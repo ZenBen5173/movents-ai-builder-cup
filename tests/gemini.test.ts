@@ -83,6 +83,22 @@ test("citations: an item is backed only when a cited passage names it", () => {
   assert.deepEqual(citedChunks(g, "John Invented"), []);
 });
 
+test("citations: a person is backed by cited sentences in their own section of the answer", () => {
+  const text = ["1. **Prof. Dr. Sarinder Kaur**", "* Founder of Sarinder Labs at Universiti Malaya.", "2. **Dr. Kev Lim**", "* Leads a Malaysian health-tech company.", "3. **Made Up Person**", "* Does things."].join(String.fromCharCode(10));
+  const g = {
+    queries: [],
+    chunks: [{ uri: "https://um.example", title: "um" }, { uri: "https://qmed.example", title: "qmed" }],
+    supports: [
+      { text: "* Founder of Sarinder Labs at Universiti Malaya.", chunks: [0] },
+      { text: "* Leads a Malaysian health-tech company.", chunks: [1] },
+    ],
+  };
+  const names = ["Prof. Dr. Sarinder Kaur", "Dr. Kev Lim", "Made Up Person"];
+  assert.deepEqual(citedChunks(g, names[0], { text, names }), [0]);
+  assert.deepEqual(citedChunks(g, names[1], { text, names }), [1]);
+  assert.deepEqual(citedChunks(g, names[2], { text, names }), [], "no cited sentence in their section");
+});
+
 test("time saved counts each piece of work once and ignores unknown keys", () => {
   const t = timeSaved(["proposal", "proposal", "budget", "nope"]);
   assert.equal(t.items.length, 2);
