@@ -8,6 +8,8 @@ import { visibleSql } from "@/lib/members";
 import { listWorkspaces } from "@/lib/workspace";
 import { geminiEnabled } from "@/lib/ai/gemini";
 import { Movi } from "@/components/app/movi";
+import { NavProgress } from "@/components/app/nav-progress";
+import { Suspense } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     >
       {children}
       {geminiEnabled() && <Movi />}
+      <Suspense>
+        <NavProgress />
+      </Suspense>
     </AppShell>
   );
 }

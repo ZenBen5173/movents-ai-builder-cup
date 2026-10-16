@@ -48,10 +48,11 @@ export async function createDemoSandbox() {
 }
 
 /** Three different sample events, so a new sandbox shows a busy society rather than an empty Box office. */
-const SAMPLE_EVENTS: { days: number; title: string; topic: string; brief: string; team: string[]; proposal: { overview: string; objectives: string[]; outcomes: string; audience: string } }[] = [
+const SAMPLE_EVENTS: { days: number; title: string; topic: string; brief: string; team: string[]; ask?: { who: string; what: "budget" | "faculty" }; proposal: { overview: string; objectives: string[]; outcomes: string; audience: string } }[] = [
   {
     days: 45,
     title: "AI for Climate Hackathon",
+    ask: { who: "Daniel Lim", what: "budget" },
     topic: "AI for climate action",
     brief: "Plan a 120-pax AI for Climate Hackathon at Sunway, 9am to 6pm, budget RM5,000",
     team: ["Daniel Lim", "Priya Nair", "Hafiz Ismail"],
@@ -65,6 +66,7 @@ const SAMPLE_EVENTS: { days: number; title: string; topic: string; brief: string
   {
     days: 25,
     title: "Data Science with Python Workshop",
+    ask: { who: "Mei Ling Ong", what: "budget" },
     topic: "data science with Python",
     brief: "Plan a 60-pax Data Science with Python workshop at Sunway, 2pm to 5pm, budget RM1,200",
     team: ["Mei Ling Ong", "Wei Jie Tan"],
@@ -78,6 +80,7 @@ const SAMPLE_EVENTS: { days: number; title: string; topic: string; brief: string
   {
     days: 70,
     title: "Tech Career Fair",
+    ask: { who: "Priya Nair", what: "faculty" },
     topic: "tech careers and internships",
     brief: "Plan a 200-pax Tech Career Fair at Sunway, 10am to 4pm, budget RM4,000",
     team: ["Aisyah Rahman", "Priya Nair"],
@@ -92,8 +95,9 @@ const SAMPLE_EVENTS: { days: number; title: string; topic: string; brief: string
 
 /**
  * Plan the sample events with the rule-based planner (no AI, a few seconds
- * each): timeline, venue, budget, risks, run of show and marketing kit. No
- * outbound action runs, so nothing waits in Backstage.
+ * each): timeline, venue, budget, risks, run of show and marketing kit.
+ * Teammates then ask the President for the sign-offs a real committee would
+ * (two budgets, one faculty submission), so Backstage has real requests.
  */
 export async function seedDemoEvents(userId: string) {
   const { parsePrompt } = await import("./planning");
@@ -123,8 +127,23 @@ export async function seedDemoEvents(userId: string) {
       await T.generateOpsPack(ev.id);
       await T.writeProposalText(ev.id, s.proposal);
       await generateKit(ev.id, { withImages: false });
+      if (s.ask) {
+        const mate = await one<import("./types").User>("SELECT u.id, u.name, u.email, u.phone, m.society_id, m.role, m.department FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.society_id = $1 AND u.name = $2", [user.society_id, s.ask.who]);
+        if (mate) {
+          if (s.ask.what === "budget") await T.requestBudgetApproval(mate, ev.id, null);
+          else await T.submitToFaculty(mate, ev.id, null);
+        }
+      }
     } catch (err) {
       console.error("[demo] sample event failed", s.brief, err);
     }
   }
+  await audit(user, "demo.seeded", { events: SAMPLE_EVENTS.length }, { societyId: user.society_id });
+}
+
+/** How far the sample events are, for the setting-up screen. */
+export async function demoProgress(societyId: string) {
+  const events = await query<{ title: string }>("SELECT title FROM events WHERE society_id = $1 ORDER BY created_at", [societyId]);
+  const done = await one("SELECT 1 FROM audit_logs WHERE society_id = $1 AND action = 'demo.seeded' LIMIT 1", [societyId]);
+  return { events: events.map((e) => e.title), total: SAMPLE_EVENTS.length, done: Boolean(done) };
 }

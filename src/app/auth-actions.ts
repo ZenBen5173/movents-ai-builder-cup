@@ -69,10 +69,15 @@ export async function deleteMyAccount(confirmEmail: string): Promise<{ ok: false
 
 /** "Try the demo": a fresh private sandbox society, signed in as its President. */
 export async function startDemo() {
-  await rateLimit(`demo:ip:${await clientIp()}`, 10, 3600);
+  try {
+    await rateLimit(`demo:ip:${await clientIp()}`, 30, 3600);
+  } catch (err) {
+    if (err instanceof RateLimitError) redirect("/login?error=demo");
+    throw err;
+  }
   const userId = await createDemoSandbox();
   await startSession(userId);
-  // Fill the Box office with sample events while the visitor looks around.
+  // Plan the sample events in the background; the setting-up screen shows it happen.
   after(() => seedDemoEvents(userId));
-  redirect("/new");
+  redirect("/demo");
 }

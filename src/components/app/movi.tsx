@@ -20,7 +20,7 @@ type Msg = { role: "user" | "assistant"; text: string; proposals?: Proposal[]; s
 
 const IDEAS = ["Raise the budget to RM5,000", "Move it to next Saturday, same time", "Add a risk for heavy rain on the day", "Make the objectives more specific"];
 
-function Face({ blink, look, mood }: { blink: boolean; look: { x: number; y: number }; mood: "idle" | "think" | "happy" }) {
+export function Face({ blink, look, mood }: { blink: boolean; look: { x: number; y: number }; mood: "idle" | "think" | "happy" }) {
   const eye = (cx: number) => (
     <g key={cx}>
       <ellipse cx={cx} cy={27} rx={6} ry={blink ? 0.8 : 6.5} fill="#fff" stroke="#161514" strokeWidth={1.6} />

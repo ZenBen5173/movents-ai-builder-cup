@@ -14,6 +14,7 @@ export const metadata = { title: "Sign in" };
 const ERRORS: Record<string, string> = {
   link: "That sign-in link is invalid or has expired. Request a new one below.",
   google: "Google sign-in did not complete. Try again or use your email.",
+  demo: "Lots of demos started from this network in the last hour. Please try again in a few minutes.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {

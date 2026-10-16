@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUpRight, ChevronDown } from "lucide-react";
 import type { IconName } from "@/components/ep/icons";
@@ -96,6 +97,15 @@ function OutputRow({ label, href, kind }: { label: string; href: string; kind: s
 
 export function RunTrace({ initial }: { initial: AgentRun & { by: string | null } }) {
   const [run, setRun] = useState(initial);
+  const router = useRouter();
+  const seenEvent = useRef(initial.event_id);
+  // The sidebar lists projects: refresh it when the run creates one, and when it finishes.
+  useEffect(() => {
+    if ((run.event_id && run.event_id !== seenEvent.current) || run.status !== "running") {
+      seenEvent.current = run.event_id;
+      router.refresh();
+    }
+  }, [run.event_id, run.status, router]);
   useEffect(() => {
     if (run.status !== "running") return;
     const t = setInterval(async () => {
