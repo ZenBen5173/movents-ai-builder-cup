@@ -138,7 +138,7 @@ async function foundation(run: Run, user: User, p: NonNullable<Awaited<ReturnTyp
       task: `Event brief: ${run.prompt}\nUnderstood as: ${p.title}, ${p.topic}, ${p.pax} pax, ${p.date} ${p.startTime} to ${p.endTime}, budget cap RM${p.budget}.\nCall read_sop and match_venue together in one turn, then check_lead_times and plan_timeline together in the next. Then reply with the SOP rules and deadline problems the other agents must respect, in at most 5 short lines.`,
       tools: ["read_sop", "match_venue", "check_lead_times", "plan_timeline"],
     });
-    return { output: { notes: r.text, calls: r.log.map((c) => c.name), model: r.model }, summary: r.text.split("\n")[0]?.slice(0, 220), notes: r.text, log: r.log };
+    return { output: { notes: r.text, calls: r.log.map((c) => c.name), model: r.model }, summary: r.text.split("\n")[0]?.slice(0, 600), notes: r.text, log: r.log };
   });
   ["sop", "venue", "timeline"].forEach((k) => ctx.done.add(k));
   ctx.card = await eventCard(eventId, p.audience, p.goals);
@@ -201,7 +201,7 @@ async function toolAgent(ctx: Ctx, key: AgentKey, title: string, feedback: strin
     ctx.notes[key] = r.text;
     done.forEach((d) => ctx.done.add(d));
     const failed = r.log.filter((c) => c.error);
-    return { output: { reply: r.text, calls: r.log.map(callSummary), model: r.model }, summary: r.text.slice(0, 300), status: failed.length ? ("warn" as const) : ("ok" as const) };
+    return { output: { reply: r.text, calls: r.log.map(callSummary), model: r.model }, summary: r.text.slice(0, 600), status: failed.length ? ("warn" as const) : ("ok" as const) };
   });
 }
 

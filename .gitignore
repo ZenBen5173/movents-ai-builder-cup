@@ -20,3 +20,5 @@ pitch-video/
 # Local AI agent skill installs
 .agents/
 skills-lock.json
+
+!.env.example

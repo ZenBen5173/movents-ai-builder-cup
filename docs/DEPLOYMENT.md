@@ -1,7 +1,29 @@
 # Deploying Movents
 
-Movents is a Next.js app with a Postgres database. The reference setup is **Vercel + Neon**, but any Node 20+ host and
-any Postgres 14+ works.
+Movents is a Next.js app with a Postgres database. The reference setup is **Google Cloud Run + Vertex AI + Neon**
+(one script, below), but any Node 20+ host that runs a container and any Postgres 14+ works.
+
+## Quick deploy to Cloud Run
+
+Needs the gcloud CLI signed in (`gcloud auth login`) and billing on the Google Cloud project. Create a Neon project
+(Singapore region for asia-southeast1) and copy its pooled connection string, then:
+
+```bash
+DATABASE_URL='postgresql://...-pooler...neon.tech/neondb?sslmode=require' bash scripts/deploy-cloudrun.sh
+```
+
+(Or put `CLOUD_DATABASE_URL=...` in `.env.local` and run the script without it.) The script is safe to run again. It:
+
+1. enables Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Scheduler and Vertex AI;
+2. creates the `movents-run` service account and grants it Vertex AI access (no Gemini API key in production);
+3. stores `DATABASE_URL`, `APP_SECRET`, `CRON_SECRET` (and `GEMINI_API_KEY` from `.env.local`, used for poster
+   images) in Secret Manager;
+4. builds the `Dockerfile` with Cloud Build and deploys to Cloud Run in asia-southeast1, with CPU always on so agent
+   runs keep working after the request that started them returns;
+5. schedules `/api/cron/daily` at 09:00 Malaysia time with Cloud Scheduler;
+6. checks `/api/health`.
+
+Override `PROJECT`, `REGION` or `SERVICE` in the shell to deploy elsewhere.
 
 ## 1. Database
 
@@ -37,13 +59,17 @@ DATABASE_URL=... npm run purge-demo -- --yes # delete
 | `DATABASE_URL` | yes | Postgres connection string |
 | `APP_SECRET` | yes | 32+ random characters; signs shared links. `openssl rand -base64 48` |
 | `APP_URL` | yes | Public URL, e.g. `https://movents.example.com` (links in emails, OAuth issuer) |
-| `CRON_SECRET` | yes on Vercel | Protects `/api/cron/daily`; Vercel Cron sends it automatically |
-| Email provider | yes | One of: `RESEND_API_KEY` + `RESEND_FROM`, `SMTP_*`, or `GRAPH_*` (Outlook). Needed for sign-in links and invites |
+| `CRON_SECRET` | yes | Protects `/api/cron/daily`; the scheduler sends it as `Authorization: Bearer <secret>` |
+| `GEMINI_PROVIDER`, `GOOGLE_CLOUD_PROJECT` | for the Gemini agents | `vertex` plus the project ID uses Vertex AI as the service account. Optional `VERTEX_LOCATION` (default `global`) |
+| `GEMINI_API_KEY` | alternative | Gemini API key instead of Vertex AI (local development); also used for poster images |
+| `GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS` | optional | Main model and fallbacks, tried in order when one is busy (comma or semicolon separated) |
+| `DEMO_MODE` | optional | `1` shows "Try the live demo" on the sign-in page: a private sandbox society per click |
+| Email provider | for real accounts | One of: `RESEND_API_KEY` + `RESEND_FROM`, `SMTP_*`, or `GRAPH_*` (Outlook). Needed for sign-in links and invites. Without one, event emails stay in the in-app outbox |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | optional | "Continue with Google" |
-| `BLOB_READ_WRITE_TOKEN` | yes on Vercel | Private Vercel Blob store for poster and video uploads (`vercel blob create-store <name> --access private` connects it). Without it, media is kept in the database, which suits local development only |
+| `BLOB_READ_WRITE_TOKEN` | optional | Vercel Blob store for poster and video uploads and daily backups. Without it, media is kept in the database (fine for a demo) and backups are skipped |
 | `DATABASE_POOL_MAX` | optional | Connections per instance (default 3) |
 | `PLATFORM_ADMIN_EMAILS` | optional | Operators who may maintain any university's SOP, templates and supplier registry |
-| Integrations | optional | `LUMA_API_KEY`, `MEETUP_*`, `STRIPE_*`, `GOOGLE_*` (calendar), `GEMINI_API_KEY` (images) |
+| Integrations | optional | `LUMA_API_KEY`, `MEETUP_*`, `STRIPE_*`, `GOOGLE_*` (calendar) |
 
 See `.env.example` for the full list.
 
@@ -58,25 +84,27 @@ authorized redirect URI `https://<your-domain>/auth/google/callback`. Put the cl
 Sign-in links and invites are sent through the configured provider. With Resend, verify your sending domain and set
 `RESEND_FROM` to an address on it. Never set `EMAIL_REDIRECT_TO` in production (it reroutes event emails to test inboxes).
 
-## 3. Vercel
+## 3. Other hosts
 
-1. Import the repository. Framework: Next.js. Node 20 or 22.
-2. Add the environment variables above (Production and Preview; use a separate database for Preview).
-3. Deploy. `vercel.json` schedules the daily automations at 01:00 UTC.
-4. Check `https://<your-domain>/api/health` returns `{"ok":true}`.
+The `Dockerfile` builds the Next.js standalone server (`node server.js` on port 8080) and runs on any container host.
+Run the daily job by calling `GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` once a day. Agent runs
+continue in the background after the request returns, so the host must keep CPU available between requests.
+`vercel.json` is only used on Vercel.
 
 ## 4. After deploying
 
 - Sign in, create your society, invite the committee from **Settings → Members**.
 - Connect your AI assistant: see [AI_ASSISTANTS.md](AI_ASSISTANTS.md).
-- Point an uptime monitor at `/api/health`.
+- Point an uptime monitor at `/api/health` (`.github/workflows/uptime.yml` checks the Cloud Run URL every 15 minutes;
+  set the repository variable `APP_URL` to change it).
 - Server errors are logged as JSON lines (see `src/instrumentation.ts`); connect your log drain or error tracker there.
 
 ## Operations
 
-- **Rate limits** use the client IP from `x-real-ip` / `x-forwarded-for`. Vercel sets these; behind your own proxy,
-  make sure it overwrites them.
-- **Backups:** the daily cron (01:00 UTC) writes a compressed copy of the data to the private Blob store as `backups/YYYY-MM-DD.json.gz` and keeps 14 days. It leaves out sessions, sign-in links, OAuth tokens and rate limits (people sign in again after a restore). Restore into a migrated database (try a Neon branch first):
+- **Rate limits** use the client IP from `x-real-ip` / `x-forwarded-for`. Cloud Run and Vercel set these; behind your
+  own proxy, make sure it overwrites them.
+- **Logs:** Cloud Run sends server output to Cloud Logging. Gemini retries show as `[gemini] ...` lines.
+- **Backups:** with a Blob store connected, the daily cron writes a compressed copy of the data to the private Blob store as `backups/YYYY-MM-DD.json.gz` and keeps 14 days. It leaves out sessions, sign-in links, OAuth tokens and rate limits (people sign in again after a restore). Restore into a migrated database (try a Neon branch first):
   ```bash
   DATABASE_URL=... BLOB_READ_WRITE_TOKEN=... npm run restore-backup -- backups/2026-10-14.json.gz        # dry run
   DATABASE_URL=... BLOB_READ_WRITE_TOKEN=... npm run restore-backup -- backups/2026-10-14.json.gz --yes  # replace data
