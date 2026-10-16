@@ -18,7 +18,7 @@ export default async function UniversitiesPage() {
     <div>
       <PageHeader
         eyebrow="The campus tour"
-        title="Universities"
+        title="Your university"
         actions={<Link href="/universities/new" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground"><Plus className="size-4" />Onboard university</Link>}
       />
       <div>

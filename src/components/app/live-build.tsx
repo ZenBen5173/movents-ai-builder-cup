@@ -273,7 +273,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
       </AnimatePresence>
 
       {/* Little live feed of the last steps. */}
-      <div className="pointer-events-none fixed bottom-5 right-5 z-[60] w-72 space-y-1.5">
+      <div className="pointer-events-none fixed bottom-5 right-[100px] z-[60] w-72 space-y-1.5">
         <AnimatePresence initial={false}>
           {recent.map((s) => (
             <motion.div key={s.id} layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-center gap-2 rounded-lg border-[1.5px] border-ink/30 bg-white/95 px-2.5 py-1.5 text-xs shadow-md">

@@ -30,6 +30,7 @@ import { lumaGuests, lumaMode, meetupGuests, meetupMode } from "../integrations/
 import { loadBundle, budgetTotals, validateProposal, reportData, type ProposalText } from "../docs/builders";
 import type { BudgetLine, EventRow, Speaker, University, User, Vendor, Venue } from "../types";
 import { addMembers, resolvePeople, visibleSql } from "../members";
+import { agentContext } from "./context";
 
 export async function eventContext(eventId: string) {
   const ev = await one<EventRow>("SELECT * FROM events WHERE id = $1", [eventId]);
@@ -71,6 +72,47 @@ export async function createEvent(user: User, p: ParsedPrompt) {
     if (ids.length) await audit(user, "event.team_added", { team: p.team }, { eventId: ev.id });
   }
   return ev;
+}
+
+export type EventPatch = { title?: string; topic?: string; date?: string; start_time?: string; end_time?: string; pax?: number; budget_cap?: number };
+
+/** Change an event's basics. Returns what changed, before and after. */
+export async function updateEventDetails(user: User, eventId: string, patch: EventPatch) {
+  const ev = await one<EventRow>("SELECT * FROM events WHERE id = $1", [eventId]);
+  if (!ev) throw new Error("Event not found");
+  const next: Record<string, unknown> = {};
+  const time = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (patch.title?.trim()) next.title = patch.title.trim().slice(0, 120);
+  if (patch.topic?.trim()) next.topic = patch.topic.trim().slice(0, 120);
+  if (patch.date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.date) || Number.isNaN(Date.parse(patch.date))) throw new Error("date must be YYYY-MM-DD");
+    next.date = patch.date;
+  }
+  if (patch.start_time) {
+    if (!time.test(patch.start_time)) throw new Error("start_time must be HH:MM");
+    next.start_time = patch.start_time;
+  }
+  if (patch.end_time) {
+    if (!time.test(patch.end_time)) throw new Error("end_time must be HH:MM");
+    next.end_time = patch.end_time;
+  }
+  if (patch.pax != null) {
+    const n = Math.round(Number(patch.pax));
+    if (!(n >= 5 && n <= 5000)) throw new Error("pax must be between 5 and 5000");
+    next.pax = n;
+  }
+  if (patch.budget_cap != null) {
+    const n = Math.round(Number(patch.budget_cap));
+    if (!(n > 0 && n <= 1_000_000)) throw new Error("budget_cap must be a positive amount in RM");
+    next.budget_cap = n;
+  }
+  const changes = Object.entries(next)
+    .filter(([k, v]) => (ev as unknown as Record<string, unknown>)[k] !== v)
+    .map(([field, after]) => ({ field, before: (ev as unknown as Record<string, unknown>)[field], after }));
+  if (!changes.length) return { changed: 0, changes };
+  await update("events", eventId, Object.fromEntries(changes.map((c) => [c.field, c.after])));
+  await audit(user, "event.updated", { changes }, { eventId });
+  return { changed: changes.length, changes };
 }
 
 export async function addFlag(eventId: string, level: "info" | "warn" | "error", message: string) {
@@ -437,13 +479,14 @@ export async function outreachSpeakers(user: User, eventId: string, runId: strin
   const speakers = await query<Speaker>("SELECT * FROM speakers WHERE event_id = $1 AND status = 'found'", [eventId]);
   const results: { speaker: string; status: GateResult["status"]; detail: string }[] = [];
   for (const sp of speakers) {
-    if (!sp.email) {
+    // The AI drafts an invite even without an address; the user adds it before sending.
+    if (!sp.email && !agentContext()?.requireApproval) {
       results.push({ speaker: sp.name, status: "failed", detail: "No email on file. Add one on the Speakers page, then send again." });
       continue;
     }
     const { subject, html } = speakerEmail(sp, ev, venue, uni.society_name, user, false, uni.name);
-    const r = await gate(user, "email.speaker", `Invite ${sp.name} to speak at ${ev.title}`, { speaker_id: sp.id, to: sp.email, subject, html }, { eventId, runId });
-    results.push({ speaker: sp.name, status: r.status, detail: r.status === "blocked" ? r.reason : r.status === "executed" ? `sent → ${String(r.result.to)}` : r.error });
+    const r = await gate(user, "email.speaker", `Invite ${sp.name} to speak at ${ev.title}`, { speaker_id: sp.id, to: sp.email ?? "", subject, html }, { eventId, runId });
+    results.push({ speaker: sp.name, status: r.status, detail: r.status === "blocked" || r.status === "drafted" ? r.reason : r.status === "executed" ? `sent → ${String(r.result.to)}` : r.error });
   }
   return results;
 }
@@ -462,7 +505,7 @@ export async function requestVendorQuotes(user: User, eventId: string, runId: st
     const rcpt = await vendorRecipient(v, ev.society_id);
     const to = rcpt.to;
     const r = await gate(user, "email.vendor", `Request quote from ${v.name}`, { vendor_id: v.id, event_id: eventId, to, subject: `${rcpt.forward ? "[Forward to vendor] " : ""}Quotation request, ${ev.title} (${fmtDate(ev.date)})`, html: rcpt.forward ? forwardNote(v.name) + html : html, kind: "vendor_quote" }, { eventId, runId });
-    results.push({ vendor: v.name, status: r.status, detail: r.status === "blocked" ? r.reason : r.status === "executed" ? "sent" : r.error });
+    results.push({ vendor: v.name, status: r.status, detail: r.status === "blocked" || r.status === "drafted" ? r.reason : r.status === "executed" ? "sent" : r.error });
   }
   return results;
 }

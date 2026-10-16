@@ -185,7 +185,7 @@ function SidebarBody({ path, pending, projects, universities, user, workspaces, 
           {projects.map((p) => <ProjectNode key={p.id} p={p} path={path} onNavigate={onNavigate} />)}
         </div>
         <div className="mb-1 mt-5 flex items-center justify-between px-2.5">
-          <Link href="/universities" onClick={onNavigate} className="mono-label text-[10px] text-muted-foreground hover:text-ink">Universities</Link>
+          <Link href="/universities" onClick={onNavigate} className="mono-label text-[10px] text-muted-foreground hover:text-ink">Your university</Link>
           <Link href="/universities/new" onClick={onNavigate} className="text-xs text-muted-foreground hover:text-tomato" title="Add university">+</Link>
         </div>
         <div className="space-y-0.5">
@@ -318,12 +318,12 @@ function crumbs(path: string, projects: Project[], unis: Uni[]) {
   }
   const u = path.match(/^\/universities\/([^/]+)(?:\/([^/]+))?/);
   if (u && u[1] !== "new") {
-    items.push({ label: "Universities", href: "/universities" });
+    items.push({ label: "Your university", href: "/universities" });
     items.push({ label: unis.find((x) => x.id === u[1])?.short_name ?? "University", href: `/universities/${u[1]}` });
     items.push({ label: UNI_PAGES.find((x) => x.seg === (u[2] ?? ""))?.label ?? "SOP library" });
     return items;
   }
-  const map: Record<string, string> = { "": "Box office", new: "New event", runs: "Agent run", approvals: "Backstage", events: "Projects", checkin: "Door check-in", universities: "Universities", outbox: "Inboxes", audit: "Audit log", settings: "Settings" };
+  const map: Record<string, string> = { "": "Box office", new: "New event", runs: "Agent run", approvals: "Backstage", events: "Projects", checkin: "Door check-in", universities: "Your university", outbox: "Inboxes", audit: "Audit log", settings: "Settings" };
   const seg = path.split("/")[1] ?? "";
   items.push({ label: map[seg] ?? seg });
   if (path.split("/")[2] && seg === "universities") items.push({ label: "Onboard" });

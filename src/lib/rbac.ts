@@ -1,4 +1,4 @@
-import type { ActionType, ApprovalRequest, Role, User } from "./types";
+import { ROLE_LABEL, type ActionType, type ApprovalRequest, type Role, type User } from "./types";
 
 /** Department in the society that owns each kind of outbound action. */
 export const ACTION_DEPARTMENT: Partial<Record<ActionType, string>> = {
@@ -32,9 +32,16 @@ export type Decision =
 
 const FINAL: Role[] = ["president", "vp"];
 
+/** Actions that need someone above you to sign off: money, and anything sent to the school or faculty. */
+export const SIGNOFF_ACTIONS: ActionType[] = ["budget.approve", "payment.deposit", "email.faculty"];
+
 /**
- * The permission table from the spec (section 3), as code.
- * Every outbound action calls this before it runs.
+ * Who may do what without asking. Societies run on a short chain:
+ * committee member → head of department → VP → President. Only money
+ * (budget sign-off, deposits) and anything sent to the school or faculty
+ * needs someone higher up; committees send their own speaker, sponsor and
+ * supplier emails and publish their own posts. Every outbound action calls
+ * this before it runs.
  */
 export function decide(
   user: Pick<User, "role" | "department">,
@@ -42,50 +49,34 @@ export function decide(
   ctx: { amount?: number; threshold?: number } = {},
 ): Decision {
   if (FINAL.includes(user.role)) {
-    return { allowed: true, reason: `${user.role} has final authority` };
+    return { allowed: true, reason: `${ROLE_LABEL[user.role]} has final authority` };
+  }
+  if (user.role === "faculty_advisor") {
+    return { allowed: false, approver_role: "president", approver_department: null, reason: "Faculty advisors approve proposals; the committee runs the event" };
   }
 
-  // Internal team calendar: anyone in the society can push.
-  if (action === "calendar.push" && user.role !== "faculty_advisor") {
-    return { allowed: true, reason: "Internal calendar is open to all society members" };
-  }
-
-  if (action === "budget.approve") {
+  if (action === "budget.approve" || action === "payment.deposit") {
     const threshold = ctx.threshold ?? 1000;
     const amount = ctx.amount ?? 0;
-    if (amount <= threshold && user.role === "director") {
-      return { allowed: true, reason: `RM${amount} is within the RM${threshold} director limit` };
+    if (user.role === "director" && amount <= threshold) {
+      return { allowed: true, reason: `RM${amount} is within the RM${threshold} head-of-department limit` };
+    }
+    if (user.role === "committee" && amount <= threshold) {
+      return { allowed: false, approver_role: "director", approver_department: user.department, reason: `Budget items go to your head of department (up to RM${threshold})` };
     }
     return {
       allowed: false,
       approver_role: "president",
       approver_department: null,
-      reason:
-        amount > threshold
-          ? `RM${amount} exceeds the RM${threshold} threshold, President/VP must approve`
-          : "Budget approval needs a Director or the President",
+      reason: `RM${amount} is above the RM${threshold} limit, the VP or President must approve`,
     };
   }
 
-  const dept = ACTION_DEPARTMENT[action];
-  if (dept) {
-    if (user.role === "director") {
-      return { allowed: true, reason: `Directors may send ${ACTION_LABEL[action].toLowerCase()}s` };
-    }
-    return {
-      allowed: false,
-      approver_role: "director",
-      approver_department: dept,
-      reason: `Committee members cannot send outbound email, routed to the ${dept} Director`,
-    };
+  if (action === "email.faculty") {
+    return { allowed: false, approver_role: "president", approver_department: null, reason: "Anything sent to the faculty or school needs the VP or President first" };
   }
 
-  return {
-    allowed: false,
-    approver_role: "president",
-    approver_department: null,
-    reason: `${ACTION_LABEL[action]} needs final approval from the President/VP`,
-  };
+  return { allowed: true, reason: "Committees send their own outreach and posts" };
 }
 
 /** Can this user approve or reject this request? */

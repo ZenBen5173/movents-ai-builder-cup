@@ -88,14 +88,31 @@ async function vertexToken() {
   if (token && token.until > Date.now() + 60_000) return token.value;
   let res: Response;
   try {
-    res = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000) });
+    res = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(3000) });
   } catch {
+    // Local development: borrow the developer's gcloud sign-in.
+    if (process.env.NODE_ENV !== "production") {
+      const value = await gcloudToken();
+      token = { value, until: Date.now() + 45 * 60_000 };
+      return value;
+    }
     throw new GeminiError("No Google Cloud credentials here (Vertex AI needs to run on Google Cloud, or set GOOGLE_ACCESS_TOKEN)", 401, "auth");
   }
   if (!res.ok) throw new GeminiError(`Could not get a Google Cloud access token (${res.status})`, 401, "auth");
   const j = (await res.json()) as { access_token: string; expires_in: number };
   token = { value: j.access_token, until: Date.now() + j.expires_in * 1000 };
   return token.value;
+}
+
+async function gcloudToken() {
+  const { exec } = await import("node:child_process");
+  return new Promise<string>((resolve, reject) =>
+    exec("gcloud auth print-access-token", { timeout: 20_000, windowsHide: true }, (err, stdout) => {
+      const t = String(stdout ?? "").trim().split(/\s+/).pop() ?? "";
+      if (err || !t) reject(new GeminiError("Vertex AI locally needs `gcloud auth login` (or GOOGLE_ACCESS_TOKEN)", 401, "auth"));
+      else resolve(t);
+    }),
+  );
 }
 
 async function authHeaders(provider: Provider): Promise<Record<string, string>> {

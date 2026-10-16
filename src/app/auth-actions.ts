@@ -1,12 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { publicError } from "@/lib/errors";
 import { consumeLoginLink, deleteAccount, endAllSessions, normaliseEmail, sendLoginLink } from "@/lib/auth/accounts";
 import { clientIp, rateLimit, RateLimitError } from "@/lib/ratelimit";
 import { endSession, startSession, currentUser } from "@/lib/session";
 import { audit } from "@/lib/audit";
-import { createDemoSandbox } from "@/lib/demo";
+import { createDemoSandbox, seedDemoEvents } from "@/lib/demo";
 
 export type LoginState = { ok: boolean; sentTo?: string; error?: string };
 
@@ -71,5 +72,7 @@ export async function startDemo() {
   await rateLimit(`demo:ip:${await clientIp()}`, 10, 3600);
   const userId = await createDemoSandbox();
   await startSession(userId);
+  // Fill the Box office with sample events while the visitor looks around.
+  after(() => seedDemoEvents(userId));
   redirect("/new");
 }

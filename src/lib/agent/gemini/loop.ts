@@ -20,7 +20,7 @@ export function declaration(name: string): FunctionDecl {
 }
 
 /** Keep what goes back to the model small: long tool results cost tokens and add nothing. */
-function compact(v: unknown, max = 6000): unknown {
+export function compact(v: unknown, max = 6000): unknown {
   const s = JSON.stringify(v ?? null);
   if (s.length <= max) return v ?? null;
   return { truncated: true, preview: s.slice(0, max) };

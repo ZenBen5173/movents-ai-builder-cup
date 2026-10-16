@@ -14,7 +14,7 @@ const { parseJson, gemini } = await import("../src/lib/ai/gemini");
 const { declaration, runToolAgent } = await import("../src/lib/agent/gemini/loop");
 const { withAgent } = await import("../src/lib/agent/context");
 const { Run } = await import("../src/lib/agent/run");
-const { gate } = await import("../src/lib/actions");
+const { gate, decideDraft } = await import("../src/lib/actions");
 const { createDemoSandbox } = await import("../src/lib/demo");
 const { one, query } = await import("../src/lib/db");
 const T = await import("../src/lib/agent/tools");
@@ -194,16 +194,28 @@ test("agent loop: a tool the agent was not given is refused and reported back to
   }
 });
 
-test("outbound actions from the AI agent always wait for a human, even for a President", async () => {
+test("from the AI agent: money and faculty wait for sign-off, outreach becomes a draft you send", async () => {
   const user = await sandbox();
   assert.equal(user.role, "president");
   const ev = await T.createEvent(user, parsePrompt("Plan a 60-pax talk at Sunway on 12 Dec, budget RM2,000", TODAY));
   const run = await Run.start(user, "test", "plan", "gemini");
-  const r = await withAgent({ run, label: "Gemini · approvals", requireApproval: true }, () => gate(user, "publish.luma", "Publish", { event_id: ev.id }, { eventId: ev.id, runId: run.id }));
-  assert.equal(r.status, "blocked");
-  const apr = await one<{ approver_role: string; run_id: string }>("SELECT approver_role, run_id FROM approval_requests WHERE event_id = $1", [ev.id]);
-  assert.equal(apr?.approver_role, "president");
-  assert.equal(apr?.run_id, run.id);
+  const agent = <R,>(fn: () => Promise<R>) => withAgent({ run, label: "Gemini · approvals", requireApproval: true }, fn);
+  const budget = await agent(() => gate(user, "budget.approve", "Approve budget", { event_id: ev.id, amount: 1800 }, { eventId: ev.id, runId: run.id, amount: 1800 }));
+  assert.equal(budget.status, "blocked", "even a President's AI run waits for sign-off on money");
+  const [sp] = await T.saveSpeakers(ev.id, [{ name: "Dr X", headline: "AI lead", source_url: "https://x.example" }]);
+  const invite = await agent(() => gate(user, "email.speaker", "Invite Dr X", { speaker_id: sp.id, to: "", subject: "Invitation", html: "<p>Hi</p>" }, { eventId: ev.id, runId: run.id }));
+  assert.equal(invite.status, "drafted");
+  const rows = await query<{ status: string; approver_role: string; action_type: string }>("SELECT status, approver_role, action_type FROM approval_requests WHERE event_id = $1 ORDER BY created_at", [ev.id]);
+  assert.deepEqual(rows.map((r) => r.status), ["pending", "draft"], "only the budget reaches Backstage");
+  // The draft needs an address, then sends as the user's own action.
+  const draftId = invite.status === "drafted" ? invite.approval.id : "";
+  await assert.rejects(() => decideDraft(user, draftId, "send"), /valid email/);
+  const sent = await decideDraft(user, draftId, "send", { to: "speaker@example.com" });
+  assert.equal(sent.status, "executed");
+  const mail = await one<{ intended_to: string; status: string }>("SELECT intended_to, status FROM emails WHERE event_id = $1", [ev.id]);
+  assert.equal(mail?.intended_to, "speaker@example.com");
+  assert.equal((await one<{ email: string }>("SELECT email FROM speakers WHERE id = $1", [sp.id]))?.email, "speaker@example.com", "the address is remembered");
+  await assert.rejects(() => decideDraft(user, draftId, "send"), /not found|already sent/);
 });
 
 test("demo sandboxes are separate societies", async () => {

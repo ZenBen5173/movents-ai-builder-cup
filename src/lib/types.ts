@@ -3,7 +3,7 @@ export type Role = "president" | "vp" | "director" | "committee" | "faculty_advi
 export const ROLE_LABEL: Record<Role, string> = {
   president: "President",
   vp: "Vice President",
-  director: "Director / HOD",
+  director: "Head of department",
   committee: "Committee member",
   faculty_advisor: "Faculty advisor",
 };
@@ -187,7 +187,7 @@ export type ApprovalRequest = {
   requested_by: string | null;
   approver_role: Role;
   approver_department: string | null;
-  status: "pending" | "approved" | "rejected" | "awaiting_faculty" | "executed" | "failed";
+  status: "draft" | "pending" | "approved" | "rejected" | "awaiting_faculty" | "executed" | "failed";
   decided_by: string | null;
   decided_at: string | null;
   decision_note: string | null;

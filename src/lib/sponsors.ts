@@ -1,4 +1,5 @@
 import "server-only";
+import { agentContext } from "./agent/context";
 import { id, insert, one, query, update } from "./db";
 import { fmtDate, fmtRM, outputsUrl } from "./appurl";
 import { emailShell } from "./integrations/email";
@@ -143,8 +144,9 @@ export async function sponsorContext(eventId: string, sender: Pick<User, "name">
 
 /** One gated send. Committee members get queued for the Programmes Director. */
 export async function sendSponsorOutreach(user: User, sp: Sponsor, draft: SponsorDraft, runId: string | null = null) {
-  const to = draft.to.trim() || sp.contact_email;
-  if (!to) return { status: "failed" as const, error: `No contact email for ${sp.company}. Add one on the Sponsors page.` };
+  const to = draft.to.trim() || sp.contact_email || "";
+  // The AI drafts the email even without an address; the user adds it before sending.
+  if (!to && !agentContext()?.requireApproval) return { status: "failed" as const, error: `No contact email for ${sp.company}. Add one on the Sponsors page.` };
   return gate(user, "email.sponsor", `Sponsorship email to ${sp.company}`, { sponsor_id: sp.id, event_id: sp.event_id, to, subject: draft.subject, html: sponsorHtml(draft.body, sp.event_id) }, { eventId: sp.event_id, runId });
 }
 
@@ -156,7 +158,7 @@ export async function outreachSponsors(user: User, eventId: string, ids: string[
   const results: { sponsor: string; status: GateResult["status"]; detail: string }[] = [];
   for (const sp of list) {
     const r = await sendSponsorOutreach(user, sp, sponsorDraft(sp, ctx), runId);
-    results.push({ sponsor: sp.company, status: r.status, detail: r.status === "blocked" ? r.reason : r.status === "executed" ? `sent → ${String(r.result.intended_to ?? r.result.to)}, proposal attached` : r.error });
+    results.push({ sponsor: sp.company, status: r.status, detail: r.status === "blocked" || r.status === "drafted" ? r.reason : r.status === "executed" ? `sent → ${String(r.result.intended_to ?? r.result.to)}, proposal attached` : r.error });
   }
   return results;
 }

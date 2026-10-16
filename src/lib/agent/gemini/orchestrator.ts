@@ -330,11 +330,16 @@ function flattenChecks(det: Record<string, unknown>) {
 
 // ------------------------------------------------------------------ approvals + finish
 
-/** Outbound work is drafted and queued for a human; nothing leaves Movents without approval. */
+/**
+ * Nothing leaves Movents on the AI's say-so. Outreach (speakers, sponsors,
+ * suppliers) is drafted for the organiser to review and send; the budget and
+ * the faculty submission go to Backstage for sign-off. Posts and the public
+ * event page stay as drafts on their tabs.
+ */
 async function approvals(ctx: Ctx) {
   const { run, user, eventId } = ctx;
   await withAgent({ run, label: label("approvals"), requireApproval: true }, async () => {
-    for (const name of ["send_speaker_outreach", "request_vendor_quotes", "send_sponsor_outreach", "request_budget_approval", "request_social_approval", "submit_to_faculty", "publish_event", "push_calendar"]) {
+    for (const name of ["send_speaker_outreach", "send_sponsor_outreach", "request_vendor_quotes", "request_budget_approval", "submit_to_faculty", "push_calendar"]) {
       await findTool(name)!.run({ event_id: eventId, run_id: run.id }, user).catch(() => null); // The failed step is already in the trace.
     }
   });
@@ -344,23 +349,24 @@ async function approvals(ctx: Ctx) {
 async function finish(ctx: Ctx, issues: Issue[]) {
   const { run, user, eventId } = ctx;
   const pending = await query<{ title: string; approver_role: string }>("SELECT title, approver_role FROM approval_requests WHERE event_id = $1 AND status = 'pending' ORDER BY created_at", [eventId]);
+  const drafts = await query<{ title: string }>("SELECT title FROM approval_requests WHERE event_id = $1 AND status = 'draft' ORDER BY created_at", [eventId]);
   const saved = timeSaved([...ctx.done]);
   const human = issues.filter((i) => i.agent === "human" || i.severity === "high" || ctx.blocked.has(i.agent as AgentKey));
   const s = await run.step("Planner: summary", label("planner"), {}, async () => {
     let text = "";
     try {
       const { data } = await geminiJson<{ summary: string }>({
-        system: `${BASE}\nWrite the final note to the organiser: 2 or 3 sentences. Say what is ready, what waits for approval and who approves it, and anything only they can decide.`,
-        prompt: JSON.stringify({ event: ctx.card, waiting_for_approval: pending, needs_human: human, notes: ctx.notes }),
+        system: `${BASE}\nWrite the final note to the organiser: 2 or 3 sentences. Say what is ready, which drafts they should review and send themselves (outreach emails), what waits for sign-off and who signs it, and anything only they can decide.`,
+        prompt: JSON.stringify({ event: ctx.card, drafts_for_you_to_send: drafts.map((d) => d.title), waiting_for_signoff: pending, needs_human: human, notes: ctx.notes }),
         schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] },
       });
       text = data.summary;
     } catch {
-      text = `Plan ready. ${pending.length} action(s) wait for approval.`;
+      text = `Plan ready. ${drafts.length} draft(s) to review and send, ${pending.length} item(s) waiting for sign-off.`;
     }
     return {
       summary: text,
-      output: { time_saved_hours: saved.hours, time_saved_breakdown: saved.items, waiting_for_approval: pending, needs_human: human },
+      output: { time_saved_hours: saved.hours, time_saved_breakdown: saved.items, drafts: drafts.map((d) => d.title), waiting_for_approval: pending, needs_human: human },
       validation: [{ check: "Committee time saved (estimate)", passed: true, detail: `about ${saved.hours} hours across ${saved.items.length} tasks` }],
       text,
     };
@@ -369,7 +375,8 @@ async function finish(ctx: Ctx, issues: Issue[]) {
     if (k === "report_pdf" || k === "report_docx") continue; // The post-event report comes after the event.
     await run.output(k.replace(/_/g, " ").replace(/^[a-z]/, (c) => c.toUpperCase()).replace(/ (pdf|docx|xlsx|csv|ics)$/, " (.$1)"), v.replace(/^https?:\/\/[^/]+/, "").replace(/\?t=.*$/, ""), k.split("_").pop() ?? "page");
   }
-  await run.output("Approval queue", "/approvals", "page");
+  if (drafts.length) await run.output(`Drafts to review and send (${drafts.length})`, `/events/${eventId}/inbox#drafts`, "page");
+  await run.output("Backstage sign-offs", "/approvals", "page");
   await audit(user, "agent.run_completed", { run_id: run.id, kind: "plan", engine: "gemini", steps: run.steps.length, time_saved_hours: saved.hours }, { eventId });
-  await run.finish({ event_id: eventId, summary: s.text, time_saved_hours: saved.hours, waiting_for_approval: pending.length, needs_human: human.map((h) => h.problem) });
+  await run.finish({ event_id: eventId, summary: s.text, time_saved_hours: saved.hours, drafts: drafts.length, waiting_for_approval: pending.length, needs_human: human.map((h) => h.problem) });
 }

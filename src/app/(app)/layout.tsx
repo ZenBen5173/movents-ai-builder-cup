@@ -6,6 +6,8 @@ import { canDecide } from "@/lib/rbac";
 import type { ApprovalRequest } from "@/lib/types";
 import { visibleSql } from "@/lib/members";
 import { listWorkspaces } from "@/lib/workspace";
+import { geminiEnabled } from "@/lib/ai/gemini";
+import { Movi } from "@/components/app/movi";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       universities={universities}
     >
       {children}
+      {geminiEnabled() && <Movi />}
     </AppShell>
   );
 }

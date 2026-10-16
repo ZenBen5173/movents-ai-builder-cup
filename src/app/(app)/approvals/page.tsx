@@ -28,7 +28,7 @@ export default async function BackstagePage() {
      FROM approval_requests a
      LEFT JOIN users u ON u.id = a.requested_by LEFT JOIN users d ON d.id = a.decided_by LEFT JOIN events e ON e.id = a.event_id
      LEFT JOIN vendors v ON v.id = a.payload->>'vendor_id' LEFT JOIN speakers s ON s.id = a.payload->>'speaker_id'
-     WHERE a.society_id = $1 AND ($2 OR a.requested_by = $3 OR (e.id IS NOT NULL AND ${visibleSql(user, 3)}))
+     WHERE a.society_id = $1 AND NOT (a.payload ? '_draft') AND ($2 OR a.requested_by = $3 OR (e.id IS NOT NULL AND ${visibleSql(user, 3)}))
      ORDER BY CASE a.status WHEN 'pending' THEN 0 WHEN 'awaiting_faculty' THEN 1 ELSE 2 END, a.created_at DESC LIMIT 200`,
     [user.society_id, user.role !== "committee", user.id],
   );

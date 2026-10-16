@@ -323,6 +323,7 @@ export async function payDeposit(vendorId: string, eventId: string | null, amoun
     const r = await gate(user, "payment.deposit", `Pay RM${amount} deposit to ${v.name}`, { vendor_id: vendorId, event_id: eventId, amount }, { eventId, amount });
     if (r.status === "blocked") return `Sent for approval: ${r.reason}`;
     if (r.status === "failed") throw new Error(r.error);
+    if (r.status === "drafted") return "Drafted";
     return { message: "Checkout created", data: { url: r.result.checkout_url } };
   }, ["/vendors", "/events"]);
 }

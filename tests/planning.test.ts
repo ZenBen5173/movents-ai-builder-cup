@@ -92,15 +92,22 @@ test("nps, themes and lesson signals", () => {
   assert.equal(parseSignals("x\n```signals\n{\"show_rate\":0.68}\n```").show_rate, 0.68);
 });
 
-test("rbac matches the spec table", () => {
+test("rbac: only money and faculty submissions need someone above you", () => {
   const committee = { role: "committee" as const, department: "Programmes" };
   const director = { role: "director" as const, department: "Programmes" };
   const president = { role: "president" as const, department: "Executive" };
+  const advisor = { role: "faculty_advisor" as const, department: null };
   const f = decide(committee, "email.faculty");
   assert.equal(f.allowed, false);
   assert.equal(!f.allowed && f.approver_role, "president");
-  const s = decide(committee, "email.speaker");
-  assert.equal(!s.allowed && s.approver_role, "director");
+  // Committees send their own outreach and posts.
+  for (const a of ["email.speaker", "email.sponsor", "email.vendor", "publish.social", "publish.luma"] as const) assert.equal(decide(committee, a).allowed, true, a);
+  // Small budget items go to the head of department, big ones to the VP/President.
+  const small = decide(committee, "budget.approve", { amount: 800, threshold: 1000 });
+  assert.equal(!small.allowed && small.approver_role, "director");
+  const big = decide(committee, "budget.approve", { amount: 3000, threshold: 1000 });
+  assert.equal(!big.allowed && big.approver_role, "president");
+  assert.equal(decide(advisor, "email.speaker").allowed, false);
   assert.equal(decide(director, "email.speaker").allowed, true);
   assert.equal(decide(director, "email.faculty").allowed, false);
   assert.equal(decide(director, "budget.approve", { amount: 3000, threshold: 1000 }).allowed, false);

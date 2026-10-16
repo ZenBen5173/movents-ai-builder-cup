@@ -2,7 +2,7 @@ import "server-only";
 import { esc } from "./html";
 import { audit, notify } from "./audit";
 import { id, insert, one, query, update } from "./db";
-import { ACTION_LABEL, canDecide, decide } from "./rbac";
+import { ACTION_LABEL, SIGNOFF_ACTIONS, canDecide, decide } from "./rbac";
 import { appUrl, fmtDate, fmtRM, outputsUrl, signToken } from "./appurl";
 import { emailShell, sendEmail } from "./integrations/email";
 import { buildIcs, calendarMode, createGoogleEvent } from "./integrations/gcal";
@@ -14,6 +14,7 @@ import type { ActionType, ApprovalRequest, EventRow, Speaker, Sponsor, Task, Uni
 export type GateResult =
   | { status: "executed"; result: Record<string, unknown>; reason: string }
   | { status: "blocked"; approval: ApprovalRequest; reason: string }
+  | { status: "drafted"; approval: ApprovalRequest; reason: string; result?: undefined; error?: undefined }
   | { status: "failed"; error: string };
 
 type Payload = Record<string, unknown>;
@@ -21,7 +22,9 @@ type Payload = Record<string, unknown>;
 /**
  * The single gate every outbound action passes through.
  * Allowed → runs now. Not allowed → approval request, approver notified, action blocked.
- * Both paths land in the audit log.
+ * From the AI agent → sign-off actions are always queued for a human above; everything
+ * else becomes a draft the user reviews and sends themselves (Drafts on the event inbox).
+ * Every path lands in the audit log.
  */
 export async function gate(
   user: User,
@@ -32,10 +35,12 @@ export async function gate(
 ): Promise<GateResult> {
   const threshold = await budgetThreshold(opts.eventId ?? null);
   let d = decide(user, action, { amount: opts.amount, threshold });
-  // The in-app AI agent never acts outside Movents alone: even a President's
-  // run queues outbound actions for a human. The internal calendar is exempt.
-  if (d.allowed && action !== "calendar.push" && agentContext()?.requireApproval) {
-    d = { allowed: false, approver_role: "president", approver_department: null, reason: "Drafted by the AI agent, a human must approve before it goes out" };
+  // The in-app AI agent never acts outside Movents alone. Money and faculty
+  // submissions wait for sign-off even on a President's run; outreach and
+  // posts become drafts the user sends. The internal calendar is exempt.
+  if (action !== "calendar.push" && agentContext()?.requireApproval) {
+    if (!SIGNOFF_ACTIONS.includes(action)) return draft(user, action, title, payload, opts);
+    if (d.allowed) d = { allowed: false, approver_role: "president", approver_department: null, reason: "Prepared by the AI agent, the VP or President signs off before it goes out" };
   }
   if (d.allowed) {
     try {
@@ -101,6 +106,50 @@ async function notifyApproverByEmail(role: string, dept: string | null, approval
       sentBy: "system",
     });
   }
+}
+
+/** An AI-prepared action waiting for its own user to review and send (not in Backstage). */
+async function draft(user: User, action: ActionType, title: string, payload: Payload, opts: { eventId?: string | null; runId?: string | null }): Promise<GateResult> {
+  const approval = await insert<ApprovalRequest>("approval_requests", {
+    id: id("apr"),
+    event_id: opts.eventId ?? null,
+    society_id: user.society_id,
+    action_type: action,
+    title,
+    // Tagged so Backstage (sign-offs only) leaves drafts out, before and after sending.
+    payload: { ...payload, _draft: true },
+    requested_by: user.id,
+    approver_role: user.role,
+    approver_department: user.department,
+    status: "draft",
+    run_id: opts.runId ?? null,
+  });
+  await audit(user, "draft.created", { action, title, approval_id: approval.id, by: "ai_agent" }, { eventId: opts.eventId });
+  return { status: "drafted", approval, reason: payload.to ? "Drafted for you to review and send" : "Drafted, add the email address before sending" };
+}
+
+/**
+ * Send (or discard) a draft the AI prepared. Only the person it was drafted
+ * for can do it; sending goes through the gate as their own action.
+ */
+export async function decideDraft(user: User, draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string } = {}) {
+  const d = await one<ApprovalRequest>("SELECT * FROM approval_requests WHERE id = $1 AND status = 'draft' AND requested_by = $2", [draftId, user.id]);
+  if (!d) throw new Error("Draft not found, or already sent");
+  if (decision === "discard") {
+    await update("approval_requests", d.id, { status: "rejected", decided_by: user.id, decided_at: new Date() });
+    return { status: "discarded" as const };
+  }
+  const to = (edits.to ?? String(d.payload.to ?? "")).trim();
+  if (d.action_type.startsWith("email.") && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Add a valid email address first");
+  const payload: Record<string, unknown> = { ...d.payload, ...(d.action_type.startsWith("email.") ? { to } : {}), ...(edits.subject?.trim() ? { subject: edits.subject.trim() } : {}) };
+  // Remember a speaker's or sponsor's address for next time.
+  if (to && d.action_type === "email.speaker" && payload.speaker_id) await update("speakers", String(payload.speaker_id), { email: to });
+  if (to && d.action_type === "email.sponsor" && payload.sponsor_id) await update("sponsors", String(payload.sponsor_id), { contact_email: to });
+  const claimed = await one("UPDATE approval_requests SET status = 'approved', decided_by = $2, decided_at = now(), payload = $3 WHERE id = $1 AND status = 'draft' RETURNING id", [d.id, user.id, JSON.stringify(payload)]);
+  if (!claimed) throw new Error("This draft was just sent");
+  const r = await gate(user, d.action_type, d.title, payload, { eventId: d.event_id, runId: d.run_id });
+  await update("approval_requests", d.id, { status: r.status === "executed" ? "executed" : r.status === "blocked" ? "approved" : "failed", result: r.status === "executed" ? r.result : r.status === "failed" ? { error: r.error } : { routed_to: r.status === "blocked" ? r.approval.id : null } });
+  return r;
 }
 
 export async function budgetThreshold(eventId: string | null) {

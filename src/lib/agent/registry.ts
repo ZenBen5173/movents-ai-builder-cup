@@ -81,8 +81,9 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
     }
     if (!out.length) return { status: "ok", summary: "Nothing to do yet" };
     const blocked = out.filter((x) => (x as { status?: string }).status === "blocked").length;
+    const drafted = out.filter((x) => (x as { status?: string }).status === "drafted").length;
     const failed = out.filter((x) => (x as { status?: string }).status === "failed").length;
-    const parts = [blocked && `${blocked} of ${out.length} blocked → approval queue`, failed && `${failed} could not be drafted (${String((out.find((x) => (x as { status?: string }).status === "failed") as { detail?: string }).detail ?? "failed")})`].filter(Boolean);
+    const parts = [drafted && `${drafted} drafted for you to review and send`, blocked && `${blocked} of ${out.length} blocked → approval queue`, failed && `${failed} could not be drafted (${String((out.find((x) => (x as { status?: string }).status === "failed") as { detail?: string }).detail ?? "failed")})`].filter(Boolean);
     return { status: blocked ? "blocked" : failed ? "warn" : "ok", summary: parts.length ? parts.join("; ") : `${out.length} done` };
   }
   if (out && typeof out === "object") {
@@ -96,6 +97,7 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
       return { status: Number(o.shortfall) > 0 ? "fail" : its.length > 1 ? "warn" : "ok", summary: its.map((i) => `RM${i.total}`).join(" → "), adapt: its.length > 1 ? its.slice(1).map((i) => i.change).join(" | ") : undefined };
     }
     if (o.status === "blocked") return { status: "blocked", summary: String(o.reason ?? "Blocked → approval queue") };
+    if (o.status === "drafted") return { status: "ok", summary: String(o.reason ?? "Drafted for you to review") };
     if (o.status === "failed") return { status: "fail", summary: String(o.error ?? "failed") };
     if (o.status === "executed") return { status: "ok", summary: String(o.reason ?? "executed") };
     if (typeof o.chosen === "string") return { status: "ok", summary: o.chosen };
@@ -422,6 +424,12 @@ const ALL_TOOLS: Tool[] = [
   { name: "generate_ops_pack", description: "Generate the 15-minute run sheet, promotion checklist, reminder cadence and volunteer roster.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Ops pack", "generate_ops_pack", () => T.generateOpsPack(String(a.event_id))) },
   { name: "validate_proposal", description: "Check that the generated proposal contains every section the university SOP requires.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Validate proposal", "validate_proposal", () => T.checkProposal(String(a.event_id))) },
   {
+    name: "update_event",
+    description: "Change an event's basics: title, topic, date (YYYY-MM-DD), start_time / end_time (HH:MM, 24h), pax (expected attendance) or budget_cap (RM). Only the fields you pass change. After a date change, re-plan the timeline and check lead times; after a budget or pax change, redraft the budget.",
+    inputSchema: { type: "object", properties: { ...ev, title: str("New title"), topic: str("New topic"), date: str("YYYY-MM-DD"), start_time: str("HH:MM"), end_time: str("HH:MM"), pax: { type: "number", description: "Expected attendance" }, budget_cap: { type: "number", description: "Budget cap in RM" }, ...runId }, required: ["event_id"] },
+    run: (a, u) => traced(u, a, "Update event", "update_event", () => T.updateEventDetails(u, String(a.event_id), a as T.EventPatch)),
+  },
+  {
     name: "write_proposal_sections",
     description: "Write the event-specific wording for the proposal: overview paragraph, objectives (3 to 5 bullets), learning outcomes and target audience. Replaces the generic text in the SOP proposal. Only the fields you pass change.",
     inputSchema: { type: "object", properties: { ...ev, overview: { type: "string", description: "2 to 4 sentences: what, who, why it matters to students", maxLength: 1500 }, objectives: { type: "array", items: { type: "string" }, description: "3 to 5 measurable objectives" }, outcomes: { type: "string", description: "What participants can do afterwards", maxLength: 800 }, audience: { type: "string", description: "Who it is for, expected attendance, how they register", maxLength: 800 }, ...runId }, required: ["event_id"] },
@@ -495,7 +503,7 @@ const ALL_TOOLS: Tool[] = [
       query(
         `SELECT a.id, a.event_id, a.action_type, a.title, a.approver_role, a.approver_department, a.status, a.created_at FROM approval_requests a
          LEFT JOIN events e ON e.id = a.event_id
-         WHERE a.society_id = $1 AND ($2 = 'all' OR a.status = $2)
+         WHERE a.society_id = $1 AND ($2 = 'all' OR a.status = $2) AND NOT (a.payload ? '_draft')
            AND ($3 OR a.requested_by = $4 OR (e.id IS NOT NULL AND ${visibleSql(u, 4)}))
          ORDER BY a.created_at DESC LIMIT 100`,
         [u.society_id, String(a.status ?? "pending"), u.role !== "committee", u.id],

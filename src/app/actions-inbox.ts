@@ -29,3 +29,20 @@ export async function setEventMailbox(eventId: string, address: string, label?: 
     return { ok: false, error: publicError(err) };
   }
 }
+
+/** Send or discard an email the AI drafted for you (optionally fixing the address or subject first). */
+export async function decideDraftAction(draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string } = {}): Promise<Res> {
+  try {
+    const user = await requireUser();
+    const { decideDraft } = await import("@/lib/actions");
+    const r = await decideDraft(user, draftId, decision, edits);
+    revalidatePath("/", "layout");
+    if (r.status === "discarded") return { ok: true, message: "Draft discarded" };
+    if (r.status === "executed") return { ok: true, message: "Sent" };
+    if (r.status === "blocked") return { ok: true, message: `Sent for sign-off: ${r.reason}` };
+    if (r.status === "failed") throw new Error(r.error);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: publicError(err) };
+  }
+}

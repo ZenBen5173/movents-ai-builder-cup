@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
@@ -10,11 +10,12 @@ import { Barcode, ROLE_BAND } from "@/components/ep/kit";
 import { parsePrompt } from "@/lib/planning";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/types";
+import { composeBrief, MicButton, QuickPicks, useDictation, type Picks } from "./quick-picks";
 
 const SUGGESTIONS = [
-  "Plan a 150-pax AI talk at Sunway on 15 Nov, budget RM3,000. Use Mix Mix Catering for food.",
-  "Plan a 60-pax data science workshop at Sunway on 12 Feb, 2pm-5pm, budget RM1,200.",
-  "Generate the post-event report for the AI talk.",
+  "An AI in healthcare talk with industry speakers for 150 students, budget RM3,000.",
+  "A hands-on Gemini workshop for about 80 first-years next month, Saturday morning, RM1,500 max.",
+  "A 24-hour climate hackathon for 120 students in December, budget RM5,000.",
 ];
 
 type Person = { id: string; name: string; role: Role; department: string | null };
@@ -28,17 +29,32 @@ const first = (n: string) => n.replace(/^(Dr\.?)\s+/, "").split(/\s+/)[0];
  */
 export function PromptBox({ today, people, me, gemini = false }: { today: string; people: Person[]; me: string; gemini?: boolean }) {
   const [prompt, setPrompt] = useState("");
+  const [picks, setPicks] = useState<Picks>({});
+  const [interim, setInterim] = useState("");
   const [team, setTeam] = useState<string[]>([]);
+  const base = useRef("");
+  const dictation = useDictation((finalText, live) => {
+    if (finalText) {
+      base.current = `${base.current}${base.current && !base.current.endsWith(" ") ? " " : ""}${finalText.trim()}`;
+      setPrompt(base.current);
+    }
+    setInterim(live);
+  });
+  function startDictation() {
+    base.current = prompt.trim();
+    setInterim("");
+    dictation.start();
+  }
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const router = useRouter();
   const isReport = /report/i.test(prompt) && !/plan/i.test(prompt);
   const message = useMemo(() => {
-    const p = prompt.trim();
+    const p = isReport ? prompt.trim() : composeBrief(prompt, picks, today);
     if (!p || isReport || !team.length) return p;
     const names = team.map((id) => people.find((x) => x.id === id)?.name).filter(Boolean) as string[];
     return `${p.replace(/\.$/, "")}, with ${names.map(first).join(", ")}.`;
-  }, [prompt, team, people, isReport]);
+  }, [prompt, picks, today, team, people, isReport]);
   const parsed = useMemo(() => (message && !isReport ? parsePrompt(message, today) : null), [message, today, isReport]);
 
   async function run() {
@@ -76,9 +92,13 @@ export function PromptBox({ today, people, me, gemini = false }: { today: string
       <div className="relative rounded-2xl border-[1.5px] border-ink bg-card shadow-[4px_4px_0_0_#161514] transition-shadow focus-within:shadow-[5px_5px_0_0_#ff5a36]">
         <span aria-hidden className="absolute -left-[11px] top-1/2 size-5 -translate-y-1/2 rounded-full border-[1.5px] border-ink bg-background" />
         <span aria-hidden className="absolute -right-[11px] top-1/2 size-5 -translate-y-1/2 rounded-full border-[1.5px] border-ink bg-background" />
+        <MicButton listening={dictation.listening} supported={dictation.supported} onStart={startDictation} onStop={dictation.stop} className="absolute right-4 top-4 z-10" />
         <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          value={interim ? `${prompt}${prompt ? " " : ""}${interim}` : prompt}
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            base.current = e.target.value;
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -89,12 +109,13 @@ export function PromptBox({ today, people, me, gemini = false }: { today: string
           autoFocus
           rows={3}
           aria-label="Describe your event"
-          placeholder="Plan a 150-pax AI talk at Sunway on 15 Nov, budget RM3,000."
-          className="w-full resize-none bg-transparent px-6 pt-5 font-display text-xl font-semibold leading-snug tracking-tight outline-none placeholder:font-medium placeholder:text-ink/25 md:text-2xl"
+          placeholder={dictation.listening ? "Listening… say what you want to run" : "What are you putting on? Type it, speak it, or tap the picks below."}
+          className="w-full resize-none bg-transparent px-6 pr-16 pt-5 font-display text-xl font-semibold leading-snug tracking-tight outline-none placeholder:font-medium placeholder:text-ink/25 md:text-2xl"
         />
+        {!isReport && <QuickPicks today={today} picks={picks} onChange={setPicks} />}
         {!isReport && (
           <div className="flex flex-wrap items-center gap-1.5 px-6 pb-3">
-            <span className="mono-label mr-1 text-[9.5px] text-muted-foreground">Team</span>
+            <span className="mono-label w-[58px] shrink-0 text-[9.5px] text-muted-foreground">Team</span>
             {people
               .filter((p) => p.id !== me)
               .map((p) => {
