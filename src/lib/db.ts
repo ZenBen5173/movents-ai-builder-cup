@@ -30,7 +30,10 @@ async function createEngine(): Promise<Engine> {
     // insert()/update() already JSON.stringify objects. The driver's default
     // json serializer would stringify them again and store a jsonb *string*
     // ('"[]"'), so pass strings through untouched.
-    const sql = postgres(url, {
+    // Neon's copied URL ends with channel_binding=require, a libpq setting this
+    // driver would send to the server as a runtime parameter. Drop it.
+    const cleanUrl = url.replace(/([?&])channel_binding=[^&]*(&|$)/, (_, lead: string, tail: string) => (tail ? lead : "")).replace(/\?$/, "");
+    const sql = postgres(cleanUrl, {
       prepare: false,
       max: Number(process.env.DATABASE_POOL_MAX ?? 3),
       idle_timeout: 20,
