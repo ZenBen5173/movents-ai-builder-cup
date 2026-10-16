@@ -38,6 +38,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite", "exceljs", "nodemailer", "postgres"],
   // The poster renderer reads these at runtime; make sure the server bundle ships them.
   outputFileTracingIncludes: {
+    // Node 22+ loads these packages' require.mjs (their "module-sync" export), which the tracer misses.
+    // Without it the document downloads fail in the container.
+    "/**": ["./node_modules/generator-function/*.mjs", "./node_modules/async-function/*.mjs"],
     "/api/creatives/[id]/image": [
       "./node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff",
       "./node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff",
