@@ -158,7 +158,7 @@ export function Movi() {
   const mood = busy ? "think" : msgs.at(-1)?.state === "applied" ? "happy" : "idle";
 
   return (
-    <div className="fixed bottom-5 right-5 z-[65] flex flex-col items-end gap-3 print:hidden">
+    <div className="fixed bottom-[88px] right-3 z-[65] flex flex-col items-end gap-3 md:bottom-5 md:right-5 print:hidden">
       <AnimatePresence>
         {open && (
           <motion.div
@@ -168,7 +168,7 @@ export function Movi() {
             exit={{ opacity: 0, y: 12, scale: 0.96 }}
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
             style={{ transformOrigin: "bottom right" }}
-            className="flex max-h-[min(72vh,620px)] w-[min(380px,calc(100vw-40px))] flex-col overflow-hidden rounded-2xl border-[1.5px] border-ink bg-card shadow-[4px_4px_0_0_#161514]"
+            className="flex max-h-[min(64vh,620px)] md:max-h-[min(72vh,620px)] w-[min(380px,calc(100vw-40px))] flex-col overflow-hidden rounded-2xl border-[1.5px] border-ink bg-card shadow-[4px_4px_0_0_#161514]"
           >
             <div className="flex items-center justify-between border-b-[1.5px] border-ink bg-ink px-4 py-2.5 text-white">
               <div>
