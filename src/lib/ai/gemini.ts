@@ -1,7 +1,10 @@
 import "server-only";
 
 /**
- * Gemini API client for the in-app agents (generateContent over REST).
+ * Gemini client for the in-app agents (generateContent over REST), on either:
+ * - Vertex AI (GEMINI_PROVIDER=vertex): Google Cloud's Gemini, billed to the
+ *   project, authenticated as the Cloud Run service account. Used in production.
+ * - the Gemini API with GEMINI_API_KEY (default when a key is set): for local work.
  * - Model chain: GEMINI_MODEL first, then GEMINI_FALLBACK_MODELS, so a busy
  *   model (503) or an exhausted one (429) does not stop a run.
  * - At most GEMINI_CONCURRENCY calls in flight, so parallel agents stay
@@ -58,8 +61,45 @@ export class GeminiError extends Error {
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
+type Provider = "vertex" | "api";
+
+export function geminiProvider(): Provider | null {
+  const p = process.env.GEMINI_PROVIDER;
+  if (p === "vertex") return process.env.GOOGLE_CLOUD_PROJECT ? "vertex" : null;
+  return process.env.GEMINI_API_KEY ? "api" : null;
+}
+
 export function geminiEnabled() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return geminiProvider() !== null;
+}
+
+function endpoint(provider: Provider, model: string) {
+  if (provider === "api") return `${API}/${model}:generateContent`;
+  const loc = process.env.VERTEX_LOCATION || "global";
+  const host = loc === "global" ? "aiplatform.googleapis.com" : `${loc}-aiplatform.googleapis.com`;
+  return `https://${host}/v1/projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${loc}/publishers/google/models/${model}:generateContent`;
+}
+
+let token: { value: string; until: number } | null = null;
+
+/** The service account's access token from the Cloud Run metadata server (GOOGLE_ACCESS_TOKEN overrides, for local tests). */
+async function vertexToken() {
+  if (process.env.GOOGLE_ACCESS_TOKEN) return process.env.GOOGLE_ACCESS_TOKEN;
+  if (token && token.until > Date.now() + 60_000) return token.value;
+  let res: Response;
+  try {
+    res = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000) });
+  } catch {
+    throw new GeminiError("No Google Cloud credentials here (Vertex AI needs to run on Google Cloud, or set GOOGLE_ACCESS_TOKEN)", 401, "auth");
+  }
+  if (!res.ok) throw new GeminiError(`Could not get a Google Cloud access token (${res.status})`, 401, "auth");
+  const j = (await res.json()) as { access_token: string; expires_in: number };
+  token = { value: j.access_token, until: Date.now() + j.expires_in * 1000 };
+  return token.value;
+}
+
+async function authHeaders(provider: Provider): Promise<Record<string, string>> {
+  return provider === "api" ? { "x-goog-api-key": process.env.GEMINI_API_KEY! } : { authorization: `Bearer ${await vertexToken()}` };
 }
 
 export function modelChain(first?: string) {
@@ -93,8 +133,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const usage = { calls: 0, input: 0, output: 0, errors: 0 };
 
 export async function gemini(req: GeminiRequest): Promise<GeminiResponse> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new GeminiError("GEMINI_API_KEY is not set", 401, "auth");
+  const provider = geminiProvider();
+  if (!provider) throw new GeminiError("Gemini is not configured (set GEMINI_API_KEY, or GEMINI_PROVIDER=vertex with GOOGLE_CLOUD_PROJECT)", 401, "auth");
   const body = JSON.stringify({
     ...(req.system ? { systemInstruction: { parts: [{ text: req.system }] } } : {}),
     contents: req.contents,
@@ -115,7 +155,7 @@ export async function gemini(req: GeminiRequest): Promise<GeminiResponse> {
     let quotaOnly = true;
     for (const model of models) {
       try {
-        return await slot(() => callOnce(model, key, body, req.timeoutMs ?? 45_000));
+        return await slot(async () => callOnce(provider, model, await authHeaders(provider), body, req.timeoutMs ?? 45_000));
       } catch (err) {
         if (!(err instanceof GeminiError)) throw err;
         last = err;
@@ -127,16 +167,16 @@ export async function gemini(req: GeminiRequest): Promise<GeminiResponse> {
       }
     }
     // Search grounding without billing is refused on every model: no point waiting.
-    if (quotaOnly && req.search) break;
+    if (quotaOnly && req.search && provider === "api") break;
     await sleep(1500 * 2 ** pass + Math.random() * 500);
   }
   throw last ?? new GeminiError("Gemini call failed", 500, "other");
 }
 
-async function callOnce(model: string, key: string, body: string, timeoutMs: number): Promise<GeminiResponse> {
+async function callOnce(provider: Provider, model: string, auth: Record<string, string>, body: string, timeoutMs: number): Promise<GeminiResponse> {
   let res: Response;
   try {
-    res = await fetch(`${API}/${model}:generateContent`, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetch(endpoint(provider, model), { method: "POST", headers: { "content-type": "application/json", ...auth }, body, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     throw new GeminiError(`Gemini ${model} unreachable: ${err instanceof Error ? err.message : String(err)}`, 503, "busy");
   }
@@ -149,7 +189,8 @@ async function callOnce(model: string, key: string, body: string, timeoutMs: num
         return text;
       }
     })().slice(0, 300);
-    const kind = res.status === 429 ? "quota" : res.status === 401 || res.status === 403 ? "auth" : res.status === 400 ? "bad_request" : res.status === 404 || res.status >= 500 ? "busy" : "other";
+    // On Vertex AI a 429 is shared capacity running short, so worth a retry; on the API it is the key's quota.
+    const kind = res.status === 429 ? (provider === "vertex" ? "busy" : "quota") : res.status === 402 ? "quota" : res.status === 401 || res.status === 403 ? "auth" : res.status === 400 ? "bad_request" : res.status === 404 || res.status >= 500 ? "busy" : "other";
     throw new GeminiError(`Gemini ${model} ${res.status}: ${msg}`, res.status, kind);
   }
   const json = (await res.json()) as {

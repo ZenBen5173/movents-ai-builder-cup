@@ -25,13 +25,13 @@ const TODAY = "2026-10-16";
 /** Answer Gemini calls from a script instead of the network. */
 function fakeGemini(replies: ((body: Record<string, unknown>, model: string) => Response)[]) {
   const real = globalThis.fetch;
-  const seen: { model: string; body: Record<string, unknown> }[] = [];
+  const seen: { model: string; body: Record<string, unknown>; url: string; headers: Record<string, string> }[] = [];
   globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
-    if (!u.includes("generativelanguage.googleapis.com")) return real(url, init);
+    if (!u.includes("generativelanguage.googleapis.com") && !u.includes("aiplatform.googleapis.com")) return real(url, init);
     const model = u.match(/models\/([^:]+):/)?.[1] ?? "";
     const body = JSON.parse(String(init?.body ?? "{}"));
-    seen.push({ model, body });
+    seen.push({ model, body, url: u, headers: (init?.headers ?? {}) as Record<string, string> });
     const next = replies.shift();
     if (!next) throw new Error("unexpected Gemini call");
     return next(body, model);
@@ -112,6 +112,25 @@ test("Gemini client falls back to the next model when one is busy", async () => 
     assert.deepEqual(f.seen.map((s) => s.model), ["gemini-test", "gemini-test-2"]);
   } finally {
     f.restore();
+  }
+});
+
+test("Vertex AI mode calls the project's Gemini endpoint with a Google Cloud token, no API key", async () => {
+  const saved = { p: process.env.GEMINI_PROVIDER, proj: process.env.GOOGLE_CLOUD_PROJECT, tok: process.env.GOOGLE_ACCESS_TOKEN };
+  Object.assign(process.env, { GEMINI_PROVIDER: "vertex", GOOGLE_CLOUD_PROJECT: "proj-1", GOOGLE_ACCESS_TOKEN: "tok-1" });
+  const f = fakeGemini([fail(429), ok([{ text: "from vertex" }])]);
+  try {
+    const r = await gemini({ contents: [{ role: "user", parts: [{ text: "hi" }] }] });
+    assert.equal(r.text, "from vertex");
+    assert.equal(f.seen[0].url, "https://aiplatform.googleapis.com/v1/projects/proj-1/locations/global/publishers/google/models/gemini-test:generateContent");
+    assert.equal(f.seen[0].headers.authorization, "Bearer tok-1");
+    assert.ok(!("x-goog-api-key" in f.seen[0].headers));
+  } finally {
+    f.restore();
+    for (const [k, v] of [["GEMINI_PROVIDER", saved.p], ["GOOGLE_CLOUD_PROJECT", saved.proj], ["GOOGLE_ACCESS_TOKEN", saved.tok]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 

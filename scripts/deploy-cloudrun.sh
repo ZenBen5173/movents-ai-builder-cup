@@ -35,11 +35,13 @@ SA="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 say "Enabling APIs"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com cloudscheduler.googleapis.com generativelanguage.googleapis.com
+  secretmanager.googleapis.com cloudscheduler.googleapis.com aiplatform.googleapis.com generativelanguage.googleapis.com
 
 say "Service accounts"
 gcloud iam service-accounts describe "$SA" >/dev/null 2>&1 ||
   gcloud iam service-accounts create "$SA_NAME" --display-name "Movents on Cloud Run"
+# The app calls Gemini on Vertex AI as this account (no API key in production).
+gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/aiplatform.user --condition None >/dev/null
 # Source deploys build with the default compute account; it needs the builder role on new projects.
 gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com" \
   --role roles/cloudbuild.builds.builder --condition None >/dev/null
@@ -67,7 +69,7 @@ say "Build and deploy to Cloud Run ($REGION)"
 gcloud run deploy "$SERVICE" --source . --region "$REGION" --quiet \
   --service-account "$SA" --allow-unauthenticated \
   --cpu 1 --memory 1Gi --no-cpu-throttling --min-instances 0 --max-instances 3 --concurrency 80 --timeout 300 \
-  --set-env-vars "APP_URL=${URL},DEMO_MODE=1,GEMINI_MODEL=gemini-3.5-flash,EVENT_TIMEZONE=Asia/Kuala_Lumpur,DATABASE_POOL_MAX=5" \
+  --set-env-vars "APP_URL=${URL},DEMO_MODE=1,GEMINI_PROVIDER=vertex,GOOGLE_CLOUD_PROJECT=${PROJECT},VERTEX_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash,EVENT_TIMEZONE=Asia/Kuala_Lumpur,DATABASE_POOL_MAX=5" \
   --set-secrets "GEMINI_API_KEY=movents-gemini-key:latest,DATABASE_URL=movents-database-url:latest,APP_SECRET=movents-app-secret:latest,CRON_SECRET=movents-cron-secret:latest"
 
 say "Daily automations (Cloud Scheduler, 09:00 Malaysia time)"
