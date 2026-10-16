@@ -1,13 +1,17 @@
 name: Uptime
 
-# Pings the live app every 15 minutes. A failed run means the site or its
-# database is down; GitHub emails the repo owner about failed scheduled runs.
+# Pings the live app on Cloud Run every 15 minutes. A failed run means the site
+# or its database is down; GitHub emails the repo owner about failed scheduled runs.
+# Set the repository variable APP_URL to point it elsewhere.
 on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions: {}
+
+env:
+  APP_URL: ${{ vars.APP_URL || 'https://movents-743449161087.asia-southeast1.run.app' }}
 
 jobs:
   health:
@@ -17,10 +21,10 @@ jobs:
       - name: Check /api/health
         run: |
           for i in 1 2 3; do
-            body=$(curl -fsS --max-time 20 https://movents.vercel.app/api/health) && echo "$body" | grep -q '"ok":true' && { echo "OK: $body"; exit 0; }
+            body=$(curl -fsS --max-time 20 "$APP_URL/api/health") && echo "$body" | grep -q '"ok":true' && { echo "OK: $body"; exit 0; }
             echo "Attempt $i failed: ${body:-no response}"; sleep 20
           done
           echo "::error::Movents health check failed 3 times"
           exit 1
       - name: Check sign-in page
-        run: curl -fsS --max-time 20 -o /dev/null https://movents.vercel.app/login
+        run: curl -fsS --max-time 20 -o /dev/null "$APP_URL/login"

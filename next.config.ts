@@ -28,10 +28,15 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Self-contained server for the Cloud Run container (see Dockerfile).
+  output: "standalone",
+  // This folder is the app root, even when a parent folder has its own lockfile.
+  outputFileTracingRoot: process.cwd(),
+  turbopack: { root: process.cwd() },
   devIndicators: false,
   poweredByHeader: false,
   serverExternalPackages: ["@electric-sql/pglite", "exceljs", "nodemailer", "postgres"],
-  // The poster renderer reads these at runtime; make sure Vercel ships them.
+  // The poster renderer reads these at runtime; make sure the server bundle ships them.
   outputFileTracingIncludes: {
     "/api/creatives/[id]/image": [
       "./node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff",
