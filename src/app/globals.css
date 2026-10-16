@@ -1,0 +1,270 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-hand: "Caveat", "Comic Sans MS", cursive;
+  --color-tomato: #ff5a36;
+  --color-tomato-ink: #c8381a;
+  --color-tomato-soft: #ffe1d8;
+  --color-ticket-blue: #3d6cf5;
+  --color-sky: #cfe3ff;
+  --color-sun: #ffd84d;
+  --color-sun-soft: #fff3c4;
+  --color-mint: #d3efca;
+  --color-peach: #ffc9b8;
+  --color-sand: #ece7dc;
+  --color-tan: #c99b63;
+  --color-ink: #161514;
+  --color-canvas: #f7f5ef;
+  --shadow-pop: 0 1px 0 rgba(22,21,20,.04), 0 10px 24px -12px rgba(22,21,20,.28);
+  --shadow-hard: 3px 3px 0 0 #161514;
+}
+
+:root {
+  --radius: 0.625rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Radix Colors — 12-step scales. Each step has a fixed job, and the same step
+   number does that job in both themes, so dark mode needs no re-picking:
+   1-2 backgrounds · 3-5 component fills · 6-8 borders · 9-10 solids · 11-12 text
+   ------------------------------------------------------------------------- */
+:root {
+  --slate-1: #fcfcfd;
+  --slate-2: #f9f9fb;
+  --slate-3: #f0f0f3;
+  --slate-4: #e8e8ec;
+  --slate-5: #e0e1e6;
+  --slate-6: #d9d9e0;
+  --slate-7: #cdced6;
+  --slate-8: #b9bbc6;
+  --slate-9: #8b8d98;
+  --slate-10: #80838d;
+  --slate-11: #60646c;
+  --slate-12: #1c2024;
+  --indigo-1: #fdfdfe;
+  --indigo-2: #f7f9ff;
+  --indigo-3: #edf2fe;
+  --indigo-4: #e1e9ff;
+  --indigo-5: #d2deff;
+  --indigo-6: #c1d0ff;
+  --indigo-7: #abbdf9;
+  --indigo-8: #8da4ef;
+  --indigo-9: #3e63dd;
+  --indigo-10: #3358d4;
+  --indigo-11: #3a5bc7;
+  --indigo-12: #1f2d5c;
+  --red-1: #fffcfc;
+  --red-2: #fff7f7;
+  --red-3: #feebec;
+  --red-4: #ffdbdc;
+  --red-5: #ffcdce;
+  --red-6: #fdbdbe;
+  --red-7: #f4a9aa;
+  --red-8: #eb8e90;
+  --red-9: #e5484d;
+  --red-10: #dc3e42;
+  --red-11: #ce2c31;
+  --red-12: #641723;
+  --amber-1: #fefdfb;
+  --amber-2: #fefbe9;
+  --amber-3: #fff7c2;
+  --amber-4: #ffee9c;
+  --amber-5: #fbe577;
+  --amber-6: #f3d673;
+  --amber-7: #e9c162;
+  --amber-8: #e2a336;
+  --amber-9: #ffc53d;
+  --amber-10: #ffba18;
+  --amber-11: #ab6400;
+  --amber-12: #4f3422;
+  --grass-1: #fbfefb;
+  --grass-2: #f5fbf5;
+  --grass-3: #e9f6e9;
+  --grass-4: #daf1db;
+  --grass-5: #c9e8ca;
+  --grass-6: #b2ddb5;
+  --grass-7: #94ce9a;
+  --grass-8: #65ba74;
+  --grass-9: #46a758;
+  --grass-10: #3e9b4f;
+  --grass-11: #2a7e3b;
+  --grass-12: #203c25;
+}
+
+
+/* shadcn's semantic tokens now resolve to Radix steps rather than hand-picked
+   values, so every existing component inherits the scale automatically. */
+:root {
+  /* Light mode needs three separated planes. Radix slate 1 and 2 differ by
+     about one percent at the light end, so page and card resolved to the same
+     white and every panel disappeared. Page sits on slate-2, raised surfaces
+     go pure white, the rail recedes to slate-3. Dark mode keeps the scale as
+     it is — the steps separate properly down there. */
+  --background: #f7f5ef;
+  --foreground: #161514;
+  --card: #ffffff;
+  --card-foreground: #161514;
+  --popover: #ffffff;
+  --popover-foreground: #161514;
+  --primary: #ff5a36;
+  --primary-foreground: #ffffff;
+  --secondary: #ece7dc;
+  --secondary-foreground: #161514;
+  --muted: #efebe2;
+  --muted-foreground: #6b665e;
+  --accent: #efebe2;
+  --accent-foreground: #161514;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #e4dfd3;
+  --input: #d9d3c5;
+  --ring: #ff5a36;
+  --chart-1: #ff5a36;
+  --chart-2: #3d6cf5;
+  --chart-3: #ffd84d;
+  --chart-4: #46a758;
+  --chart-5: #8b867c;
+  --sidebar: #f1eee6;
+  --sidebar-foreground: #161514;
+  --sidebar-primary: #ff5a36;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6e1d5;
+  --sidebar-accent-foreground: #161514;
+  --sidebar-border: #e4dfd3;
+  --sidebar-ring: #ff5a36;
+}
+
+/* Must come after :root — both are one class of specificity, so order decides.
+   Dark keeps the original mapping (page on slate-1, raised surfaces on
+   slate-2), which separates fine at this end of the scale. Without this the
+   light-mode literals above leak into dark and cards render white. */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-brand: var(--brand, oklch(0.72 0.2 352.53));
+  --color-brand-light: var(--brand-light, oklch(0.78 0.15 352.53));
+  --color-brand-lighter: var(--brand-lighter, oklch(0.85 0.1 352.53));
+  --color-brand-secondary: var(--brand-secondary, oklch(0.66 0.21 354.31));
+  --color-amber: var(--amber);
+  --color-amber-fg: var(--amber-fg);
+  --color-amber-hover: var(--amber-hover);
+  --color-blue: var(--blue);
+  --color-blue-fg: var(--blue-fg);
+  --color-blue-hover: var(--blue-hover);
+  --color-green: var(--green);
+  --color-green-fg: var(--green-fg);
+  --color-green-hover: var(--green-hover);
+  --color-smooth-50: var(--smooth-50);
+  --color-smooth-100: var(--smooth-100);
+  --color-smooth-200: var(--smooth-200);
+  --color-smooth-300: var(--smooth-300);
+  --color-smooth-400: var(--smooth-400);
+  --color-smooth-500: var(--smooth-500);
+  --color-smooth-600: var(--smooth-600);
+  --color-smooth-700: var(--smooth-700);
+  --color-smooth-800: var(--smooth-800);
+  --color-smooth-900: var(--smooth-900);
+  --color-smooth-950: var(--smooth-950);
+  --color-smooth-1000: var(--smooth-1000);
+  --color-invert-foreground: var(--invert-foreground);
+  --color-invert: var(--invert);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html { color-scheme: light; }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.025em; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: color-mix(in oklab, var(--primary) 25%, transparent); }
+}
+
+@layer utilities {
+  .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes icon-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes curve-trace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  [role="status"] path { animation: none !important; stroke-dasharray: none !important; }
+}
+
+@keyframes shimmer-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.shimmer::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, white 35%, transparent), transparent);
+  animation: shimmer-sweep 2.4s ease-in-out infinite;
+}
+
+/* ---------- Movents event-kit: perforations, barcodes, tape, bunting ---------- */
+.perf-v { background-image: radial-gradient(circle, var(--color-ink) 1.2px, transparent 1.4px); background-size: 2px 8px; background-repeat: repeat-y; }
+.mono-label { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .18em; font-size: 11px; }
+.paper-grain { background-image: radial-gradient(rgba(22,21,20,.035) 1px, transparent 1px); background-size: 18px 18px; }
+@keyframes sway { 0%,100% { transform: rotate(-2.2deg); } 50% { transform: rotate(2.2deg); } }
+@keyframes flag { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(5deg); } }
+@keyframes bulb { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes stamp-in { 0% { transform: scale(2.4) rotate(-14deg); opacity: 0; } 60% { transform: scale(.94) rotate(-8deg); opacity: 1; } 100% { transform: scale(1) rotate(-8deg); opacity: 1; } }
+@keyframes beam { 0%,100% { transform: rotate(-16deg); } 50% { transform: rotate(16deg); } }
+@media (prefers-reduced-motion: reduce) { .animate-sway, .animate-flag, .animate-bulb, .animate-beam { animation: none !important; } }

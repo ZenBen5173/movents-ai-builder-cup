@@ -1,0 +1,26 @@
+name: Uptime
+
+# Pings the live app every 15 minutes. A failed run means the site or its
+# database is down; GitHub emails the repo owner about failed scheduled runs.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check /api/health
+        run: |
+          for i in 1 2 3; do
+            body=$(curl -fsS --max-time 20 https://movents.vercel.app/api/health) && echo "$body" | grep -q '"ok":true' && { echo "OK: $body"; exit 0; }
+            echo "Attempt $i failed: ${body:-no response}"; sleep 20
+          done
+          echo "::error::Movents health check failed 3 times"
+          exit 1
+      - name: Check sign-in page
+        run: curl -fsS --max-time 20 -o /dev/null https://movents.vercel.app/login
