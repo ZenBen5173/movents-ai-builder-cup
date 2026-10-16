@@ -6,7 +6,7 @@
 #   DATABASE_URL='postgresql://...neon.tech/neondb?sslmode=require' bash scripts/deploy-cloudrun.sh
 #
 # Needs: gcloud signed in (gcloud auth login), billing on the project.
-# GEMINI_API_KEY is read from .env.local when not set in the shell.
+# GEMINI_API_KEY and CLOUD_DATABASE_URL are read from .env.local when not set in the shell.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1 # Git Bash on Windows: leave "/api/..." arguments alone.
 
@@ -18,9 +18,11 @@ SA_NAME="movents-run"
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 cd "$(dirname "$0")/.."
 
-if [ -z "${GEMINI_API_KEY:-}" ] && [ -f .env.local ]; then
-  GEMINI_API_KEY="$(grep -E '^GEMINI_API_KEY=' .env.local | head -1 | cut -d= -f2- | tr -d '"\r')"
-fi
+# Values not set in the shell come from .env.local. CLOUD_DATABASE_URL keeps the
+# cloud database apart from local development (which uses PGlite).
+from_env_file() { [ -f .env.local ] && grep -E "^$1=" .env.local | head -1 | cut -d= -f2- | tr -d "\"'\r" || true; }
+GEMINI_API_KEY="${GEMINI_API_KEY:-$(from_env_file GEMINI_API_KEY)}"
+DATABASE_URL="${DATABASE_URL:-$(from_env_file CLOUD_DATABASE_URL)}"
 
 gcloud config set project "$PROJECT" >/dev/null
 if [ "$(gcloud billing projects describe "$PROJECT" --format='value(billingEnabled)')" != "True" ]; then
