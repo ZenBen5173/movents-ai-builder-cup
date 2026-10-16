@@ -158,7 +158,7 @@ async function planPipeline(run: Run) {
   await run.output("Run sheet (.pdf)", `/api/outputs/${ev.id}/runsheet.pdf`, "pdf");
 
   await run.step("Create marketing kit", nanoBananaEnabled() ? "nano-banana (gemini image) + copywriter" : "poster templates + copywriter", { channels: ["poster", "instagram", "linkedin", "reels"] }, async () => {
-    const r = await generateKit(ev.id, { withImages: true });
+    const r = await generateKit(ev.id, { withImages: false });
     return {
       output: r.creatives.map((c) => ({ kind: c.kind, channel: c.channel, image: c.kind === "video" ? "storyboard, generate with your AI assistant" : imageHref(c) })),
       summary: `Poster, Instagram post + story, LinkedIn image, captions & hashtags, 15s video storyboard${r.generated ? `, ${r.generated} images by Nano Banana` : ", branded templates (your AI assistant can replace them with generated images)"}`,

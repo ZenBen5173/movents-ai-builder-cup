@@ -117,6 +117,13 @@ async function gcloudToken() {
   );
 }
 
+/** The configured Gemini endpoint and auth for a model (used by image generation too). */
+export async function geminiTarget(model: string) {
+  const provider = geminiProvider();
+  if (!provider) throw new GeminiError("Gemini is not configured", 401, "auth");
+  return { url: endpoint(provider, model), headers: await authHeaders(provider) };
+}
+
 async function authHeaders(provider: Provider): Promise<Record<string, string>> {
   return provider === "api" ? { "x-goog-api-key": process.env.GEMINI_API_KEY! } : { authorization: `Bearer ${await vertexToken()}` };
 }

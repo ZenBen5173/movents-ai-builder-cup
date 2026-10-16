@@ -13,6 +13,7 @@ export type SpeakerCandidate = {
   source_url: string;
   email: string | null;
   fit_reason: string;
+  photo_url?: string | null;
   source: "assistant" | "sample" | "manual";
 };
 
@@ -23,6 +24,7 @@ export type SupplierCandidate = {
   unit: string;
   unit_price: number | null;
   snippet: string;
+  photo_url?: string | null;
   source: "assistant" | "reference";
 };
 

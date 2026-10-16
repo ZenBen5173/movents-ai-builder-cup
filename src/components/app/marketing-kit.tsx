@@ -119,9 +119,13 @@ function KitCard({ c, index, nano, blob }: { c: KitItem; index: number; nano: bo
         {c.kind !== "poster" && <input value={tags} onChange={(e) => setTags(e.target.value)} onBlur={save} placeholder="#hashtags" className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-xs text-primary outline-none focus:ring-2 focus:ring-ring" />}
         <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
           <CopyBtn text={tags ? `${caption}\n\n${tags}` : caption} label="Copy caption" />
-          {c.image_prompt && <CopyBtn text={c.image_prompt} label={isVideoKind ? "Copy video prompt" : "Copy Nano Banana prompt"} />}
+          {c.image_prompt && <CopyBtn text={c.image_prompt} label={isVideoKind ? "Copy video prompt" : "Copy image prompt"} />}
           <a href={`${c.href}${c.href.includes("?") ? "&" : "?"}download`} className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-xs hover:bg-accent"><Download className="size-3.5" />Download</a>
-          {nano && !isVideoKind && <ActionButton action={regenCreative.bind(null, c.id)} size="xs" icon={<Wand2 className="size-3.5" />}>Nano Banana</ActionButton>}
+          {nano && !isVideoKind && (
+            <span title="Gemini image model on Vertex AI, about RM0.18 per image">
+              <ActionButton action={regenCreative.bind(null, c.id)} size="xs" icon={<Wand2 className="size-3.5" />}>Generate with AI</ActionButton>
+            </span>
+          )}
           <button onClick={() => file.current?.click()} className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-xs hover:bg-accent"><ImagePlus className="size-3.5" />Upload</button>
           <input
             ref={file}

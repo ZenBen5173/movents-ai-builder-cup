@@ -39,7 +39,7 @@ export default async function BudgetPage({ params }: { params: Promise<{ id: str
           </div>
         }
       >
-        <BudgetTable
+        <BudgetTable eventId={id}
           lines={b.lines.map((l) => ({ ...l, vendor: b.vendors.find((v) => v.id === l.vendor_id)?.name ?? null }))}
           totals={{ ...t, cap: b.event.budget_cap, pct: sop.budget_rules.contingency_pct }}
         />

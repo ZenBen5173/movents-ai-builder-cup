@@ -1,8 +1,9 @@
-import { query } from "@/lib/db";
+import { one, query } from "@/lib/db";
 import { outputsUrl } from "@/lib/appurl";
 import { FileBrowser, type FolderNode } from "@/components/app/file-browser";
-import { canViewEvent, pageUser } from "@/lib/guard";
-import { TemplatesPanel } from "@/components/app/templates-panel";
+import { canViewEvent } from "@/lib/guard";
+import { templatesOf } from "@/lib/templates";
+import type { University } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +12,8 @@ const KIND_LABEL: Record<string, string> = { poster: "Poster", ig_post: "Instagr
 export default async function EventFiles({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!(await canViewEvent(id))) return null;
-  const user = await pageUser();
-  const [templates, filled] = await Promise.all([
-    query<{ id: string; name: string; kind: string }>("SELECT id, name, kind FROM society_templates WHERE society_id = $1 ORDER BY created_at DESC", [user.society_id]),
-    query<{ id: string; template: string; gaps: string[]; created_at: string }>(
-      "SELECT f.id, t.name AS template, f.gaps, f.created_at FROM filled_templates f JOIN society_templates t ON t.id = f.template_id WHERE f.event_id = $1 ORDER BY f.created_at DESC LIMIT 20",
-      [id],
-    ),
-  ]);
+  // The university's blank forms, for anything you would rather fill in by hand.
+  const uni = await one<Pick<University, "id" | "sop">>("SELECT u.id, u.sop FROM events e JOIN societies s ON s.id = e.society_id JOIN universities u ON u.id = s.university_id WHERE e.id = $1", [id]);
   const [report, fb, speakers, vendors, creatives] = await Promise.all([
     query("SELECT 1 FROM agent_runs WHERE event_id = $1 AND kind = 'report' LIMIT 1", [id]),
     query("SELECT 1 FROM feedback WHERE event_id = $1 LIMIT 1", [id]),
@@ -32,6 +27,23 @@ export default async function EventFiles({ params }: { params: Promise<{ id: str
   const clean = (n: string) => n.split(" — ")[0];
 
   const tree: FolderNode[] = [
+    {
+      id: "templates",
+      name: "Templates",
+      files: [],
+      folders: uni
+        ? templatesOf(uni.sop).map((t) => ({
+            id: `tpl-${t.key}`,
+            name: t.title,
+            files: [
+              { label: `${t.title} (blank, Word)`, href: `/api/templates/${uni.id}/${t.key}.docx`, kind: "docx", note: "Your university's format, ready to fill in" },
+              { label: `${t.title} (blank, PDF)`, href: `/api/templates/${uni.id}/${t.key}.pdf`, kind: "pdf" },
+              ...(t.kind === "pre_event" ? [{ label: "Filled in for this event", href: `${b}/proposal.docx`, kind: "docx", note: "Written by Movents from this event's plan" }] : []),
+              ...(t.kind === "post_event" && hasReport ? [{ label: "Filled in for this event", href: `${b}/report.docx`, kind: "docx" }] : []),
+            ],
+          }))
+        : [],
+    },
     {
       id: "proposal",
       name: "Proposal",
@@ -104,10 +116,5 @@ export default async function EventFiles({ params }: { params: Promise<{ id: str
         : [],
     },
   ];
-  return (
-    <>
-      <TemplatesPanel eventId={id} templates={templates} filled={filled.map((f) => ({ ...f, created_at: new Date(f.created_at).toISOString() }))} />
-      <FileBrowser tree={tree} />
-    </>
-  );
+  return <FileBrowser tree={tree} />;
 }

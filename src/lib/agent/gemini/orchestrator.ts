@@ -1,5 +1,5 @@
 import "server-only";
-import { geminiJson, GeminiError } from "../../ai/gemini";
+import { gemini, geminiJson, GeminiError, resolveCitation } from "../../ai/gemini";
 import { fmtDate, fmtRM, today } from "../../appurl";
 import { audit } from "../../audit";
 import { one, query } from "../../db";
@@ -8,11 +8,12 @@ import type { Speaker, User, Venue } from "../../types";
 import { withAgent } from "../context";
 import { execute } from "../pipelines";
 import { findTool, outputs } from "../registry";
-import type { Run } from "../run";
+import { Run } from "../run";
 import * as T from "../tools";
 import { BRIEF_SCHEMA, mergeBrief, timeSaved, type GeminiBrief } from "./brief";
 import { runToolAgent, type ToolCallLog } from "./loop";
 import { groundedResearch } from "./research";
+import { pageImage, pagePreview } from "../../media";
 
 /**
  * The in-app Gemini planner. One prompt in, a full event pack out:
@@ -209,10 +210,10 @@ const callSummary = (c: ToolCallLog) => (c.error ? `${c.name}: ERROR ${c.error}`
 
 async function speakerAgent(ctx: Ctx, feedback?: string) {
   return ctx.run.step(feedback ? "Speaker agent: find real speakers (revision)" : "Speaker agent: find real speakers", `${label("speaker agent")} → google_search`, { brief: ctx.briefs.speakers, feedback }, async () => {
-    const r = await groundedResearch<{ name: string; headline: string; fit_reason: string; email?: string }>({
-      question: `${ctx.card}\n\n${ctx.briefs.speakers ?? ""}\n${feedback ?? ""}\nSearch the web and name 4 real people who would be strong speakers for this event, preferably based in Malaysia or Southeast Asia (industry practitioners, researchers or founders). For each: full name, current role and organisation, and one line on why they fit. Only name people you found in search results.`,
-      extractInstruction: "List each speaker in the answer: full name, headline (role and organisation), fit_reason (one line), and email only if the answer states a public email.",
-      schema: { type: "object", properties: { speakers: { type: "array", items: { type: "object", properties: { name: { type: "string" }, headline: { type: "string" }, fit_reason: { type: "string" }, email: { type: "string" } }, required: ["name", "headline", "fit_reason"] } } }, required: ["speakers"] },
+    const r = await groundedResearch<{ name: string; headline: string; fit_reason: string; email?: string; linkedin?: string }>({
+      question: `${ctx.card}\n\n${ctx.briefs.speakers ?? ""}\n${feedback ?? ""}\nSearch the web and name 4 real people who would be strong speakers for this event, preferably based in Malaysia or Southeast Asia (industry practitioners, researchers or founders). For each: full name, current role and organisation, one line on why they fit, and their LinkedIn profile URL if you found it. Only name people you found in search results.`,
+      extractInstruction: "List each speaker in the answer: full name, headline (role and organisation), fit_reason (one line), email only if the answer states a public email, and linkedin only if the answer gives their LinkedIn profile URL.",
+      schema: { type: "object", properties: { speakers: { type: "array", items: { type: "object", properties: { name: { type: "string" }, headline: { type: "string" }, fit_reason: { type: "string" }, email: { type: "string" }, linkedin: { type: "string" } }, required: ["name", "headline", "fit_reason"] } } }, required: ["speakers"] },
       pick: (d) => ((d as { speakers?: never[] })?.speakers ?? []).slice(0, 5),
     });
     if (r.mode === "unavailable") ctx.blocked.add("speakers");
@@ -222,8 +223,10 @@ async function speakerAgent(ctx: Ctx, feedback?: string) {
       return { status: "warn" as const, summary: `${r.note ?? `No speaker could be backed by a citation (${r.dropped.length} dropped).`} Sample speakers kept, clearly marked as samples.`, output: r, validation: [{ check: "Speakers backed by Google Search citations", passed: false, detail: r.mode === "unavailable" ? "search unavailable" : `0 of ${r.dropped.length}` }] };
     }
     ctx.done.add("speakers");
+    const top = r.kept.slice(0, 3);
+    const faces = await Promise.all(top.map((s) => speakerFace(s.name, s.linkedin, s.source_url)));
     await withAgent({ run: ctx.run, label: label("speaker agent"), requireApproval: true }, () =>
-      findTool("save_speakers")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, speakers: r.kept.slice(0, 3).map((s) => ({ name: s.name, headline: s.headline, source_url: s.source_url, email: s.email || undefined, fit_reason: s.fit_reason })) }, ctx.user),
+      findTool("save_speakers")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, speakers: top.map((s, i) => ({ name: s.name, headline: s.headline, source_url: faces[i].profile ?? s.source_url, email: s.email || undefined, fit_reason: s.fit_reason, photo_url: faces[i].photo ?? undefined })) }, ctx.user),
     );
     return {
       output: { kept: r.kept, dropped: r.dropped, queries: r.queries },
@@ -232,6 +235,55 @@ async function speakerAgent(ctx: Ctx, feedback?: string) {
       adapt: r.dropped.length ? `Dropped ${r.dropped.map((d) => d.name).join(", ")}: no cited source` : undefined,
     };
   });
+}
+
+/**
+ * A speaker's photo and profile link. A LinkedIn profile counts only when the
+ * page really is that person's (its title names them); otherwise the cited
+ * page's picture is used only if the page is about them, never a stranger's face.
+ */
+async function speakerFace(name: string, linkedin: string | undefined, cited: string) {
+  const surname = name.replace(/^(dr|prof|assoc|associate|professor|dato'?|datuk|ts|ir)\.?\s+/gi, "").trim().split(/\s+/).pop()?.toLowerCase() ?? "";
+  const about = (title: string) => Boolean(surname) && title.toLowerCase().includes(surname);
+  // Social posts (Instagram, Facebook, TikTok) show anything, rarely the person's face: skip them.
+  const portrait = (img: string | null) => (img && !/(cdninstagram|fbcdn|tiktokcdn|twimg)\./i.test(img) ? img : null);
+  if (linkedin && /^https:\/\/([a-z]+\.)?linkedin\.com\/in\//i.test(linkedin)) {
+    const li = await pagePreview(linkedin);
+    if (li && about(li.title)) return { profile: linkedin, photo: portrait(li.image) };
+  }
+  const page = await pagePreview(cited);
+  if (portrait(page?.image ?? null) && about(page!.title)) return { profile: null, photo: page!.image };
+  return (await profileSearch(name, about, portrait)) ?? { profile: null, photo: null };
+}
+
+/** Ask Google Search for the person's own profile page (LinkedIn or a staff page) and take its photo when the page names them. */
+async function profileSearch(name: string, about: (title: string) => boolean, portrait: (img: string | null) => string | null) {
+  try {
+    const r = await gemini({ contents: [{ role: "user", parts: [{ text: `Find the LinkedIn profile or official staff profile page of ${name}. Give the page title and URL.` }] }], search: true, temperature: 0 });
+    const chunks = (r.grounding?.chunks ?? []).slice(0, 5);
+    const urls = await Promise.all(chunks.map((c) => resolveCitation(c.uri)));
+    // LinkedIn first: its share picture is the profile photo.
+    urls.sort((a, b) => Number(/linkedin\.com\/in\//i.test(b)) - Number(/linkedin\.com\/in\//i.test(a)));
+    for (const url of urls) {
+      const p = await pagePreview(url);
+      if (portrait(p?.image ?? null) && about(p!.title)) return { profile: /linkedin\.com\/in\//i.test(url) ? url : null, photo: p!.image };
+    }
+  } catch {
+    /* no photo is fine */
+  }
+  return null;
+}
+
+/** A company website from the research, unless it is a social network or news site rather than their own. */
+function officialSite(url: string | undefined) {
+  try {
+    if (!url) return null;
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (/(instagram|facebook|linkedin|twitter|x\.com|tiktok|youtube|scribd|prnewswire|vulcanpost|wikipedia|medium|thestar|nst\.com|malaymail|theedgemalaysia|google)\./i.test(host)) return null;
+    return url;
+  } catch {
+    return null;
+  }
 }
 
 async function budgetAgent(ctx: Ctx, feedback?: string) {
@@ -248,7 +300,9 @@ async function budgetAgent(ctx: Ctx, feedback?: string) {
       }
       ctx.done.add("suppliers");
       await withAgent({ run: ctx.run, label: label("budget agent"), requireApproval: true }, () =>
-        findTool("save_supplier_quotes")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, quotes: r.kept.map((q) => ({ category: q.category, name: q.name, url: q.source_url, unit_price: q.unit_price, unit: q.unit, snippet: q.snippet })) }, ctx.user),
+        Promise.all(r.kept.map((q) => pageImage(q.source_url))).then((pics) =>
+          findTool("save_supplier_quotes")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, quotes: r.kept.map((q, i) => ({ category: q.category, name: q.name, url: q.source_url, unit_price: q.unit_price, unit: q.unit, snippet: q.snippet, photo_url: pics[i] ?? undefined })) }, ctx.user),
+        ),
       );
       return { output: { kept: r.kept, dropped: r.dropped, queries: r.queries }, summary: r.kept.map((q) => `${q.category}: ${q.name} RM${q.unit_price}/${q.unit}`).join(" · "), validation: [{ check: "Every price has a cited source", passed: true, detail: `${r.kept.length} cited, ${r.dropped.length} dropped` }] };
     });
@@ -259,8 +313,8 @@ async function budgetAgent(ctx: Ctx, feedback?: string) {
 async function sponsorAgent(ctx: Ctx, feedback?: string) {
   return ctx.run.step(feedback ? "Sponsor agent: find likely sponsors (revision)" : "Sponsor agent: find likely sponsors", `${label("sponsor agent")} → google_search`, { brief: ctx.briefs.sponsors, feedback }, async () => {
     const r = await groundedResearch<{ name: string; website?: string; industry: string; ask: string; fit_reason: string }>({
-      question: `${ctx.card}\n\n${ctx.briefs.sponsors ?? ""}\n${feedback ?? ""}\nSearch for 5 real companies in Malaysia that sponsor or partner with university student events on this topic (tech companies, banks, telcos, food and drink brands). For each: company name, industry, why they fit, and a sensible ask (cash in RM or an in-kind item).`,
-      extractInstruction: "List each company in the answer: name, website only if stated, industry, ask, fit_reason.",
+      question: `${ctx.card}\n\n${ctx.briefs.sponsors ?? ""}\n${feedback ?? ""}\nSearch for 5 real companies in Malaysia that sponsor or partner with university student events on this topic (tech companies, banks, telcos, food and drink brands). For each: company name, their official website, industry, why they fit, and a sensible ask (cash in RM or an in-kind item).`,
+      extractInstruction: "List each company in the answer: name, website (the company's own official site, only if stated), industry, ask, fit_reason.",
       schema: { type: "object", properties: { sponsors: { type: "array", items: { type: "object", properties: { name: { type: "string" }, website: { type: "string" }, industry: { type: "string" }, ask: { type: "string" }, fit_reason: { type: "string" } }, required: ["name", "industry", "ask", "fit_reason"] } } }, required: ["sponsors"] },
       pick: (d) => ((d as { sponsors?: never[] })?.sponsors ?? []).slice(0, 6),
     });
@@ -268,7 +322,7 @@ async function sponsorAgent(ctx: Ctx, feedback?: string) {
     if (r.mode === "unavailable" || !r.kept.length) return { status: "warn" as const, summary: `${r.note ?? "No sponsor could be backed by a citation."} No sponsors saved.`, output: r };
     ctx.done.add("sponsors");
     await withAgent({ run: ctx.run, label: label("sponsor agent"), requireApproval: true }, () =>
-      findTool("save_sponsors")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, sponsors: r.kept.map((s) => ({ company: s.name, website: s.website || s.source_url, industry: s.industry, ask: s.ask, fit_reason: `${s.fit_reason} (source: ${s.source_url})` })) }, ctx.user),
+      findTool("save_sponsors")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, sponsors: r.kept.map((s) => ({ company: s.name, website: officialSite(s.website) ?? undefined, industry: s.industry, ask: s.ask, fit_reason: `${s.fit_reason} (source: ${s.source_url})` })) }, ctx.user),
     );
     return { output: { kept: r.kept, dropped: r.dropped, queries: r.queries }, summary: r.kept.map((s) => s.name).join(", "), validation: [{ check: "Every sponsor has a cited source", passed: true, detail: `${r.kept.length} cited, ${r.dropped.length} dropped` }] };
   });
@@ -379,4 +433,43 @@ async function finish(ctx: Ctx, issues: Issue[]) {
   await run.output("Backstage sign-offs", "/approvals", "page");
   await audit(user, "agent.run_completed", { run_id: run.id, kind: "plan", engine: "gemini", steps: run.steps.length, time_saved_hours: saved.hours }, { eventId });
   await run.finish({ event_id: eventId, summary: s.text, time_saved_hours: saved.hours, drafts: drafts.length, waiting_for_approval: pending.length, needs_human: human.map((h) => h.problem) });
+}
+
+/**
+ * Research one existing event: real speakers (with photos) and likely
+ * sponsors (with logos) from Google Search, shown as its own run. Used for
+ * the demo's sample events, which the fast rule-based planner seeds without AI.
+ */
+export async function researchEvent(user: User, eventId: string, what: { speakers?: boolean; sponsors?: boolean } = { speakers: true, sponsors: true }) {
+  const ev = await one<{ title: string }>("SELECT title FROM events WHERE id = $1", [eventId]);
+  if (!ev) return null;
+  const topic = [what.speakers && "speakers", what.sponsors && "sponsors"].filter(Boolean).join(" and ");
+  const run = await Run.start(user, `Find real ${topic} for ${ev.title}`, "custom", "gemini");
+  await run.setEvent(eventId);
+  const ctx: Ctx = { run, user, eventId, card: await eventCard(eventId), briefs: {} as Briefs, done: new Set(), notes: {}, blocked: new Set(), revised: new Set() };
+  try {
+    await Promise.allSettled([what.speakers ? speakerAgent(ctx) : null, what.sponsors ? sponsorAgent(ctx) : null]);
+    if (what.speakers) {
+      // Speakers already on the event who still have no photo get one more look.
+      const missing = await query<{ id: string; name: string; source_url: string | null }>("SELECT id, name, source_url FROM speakers WHERE event_id = $1 AND source <> 'sample' AND photo_url IS NULL", [eventId]);
+      await run.step("Speaker agent: find photos", `${label("speaker agent")} → google_search`, { speakers: missing.map((m) => m.name) }, async () => {
+        const faces = await Promise.all(missing.map((m) => speakerFace(m.name, undefined, m.source_url ?? "")));
+        let found = 0;
+        for (const [i, f] of faces.entries()) {
+          if (!f.photo) continue;
+          found++;
+          await query("UPDATE speakers SET photo_url = $2, source_url = coalesce($3, source_url) WHERE id = $1", [missing[i].id, f.photo, f.profile]);
+        }
+        return { summary: missing.length ? `${found} of ${missing.length} photo(s) found on pages that name the speaker` : "Every speaker already has a photo", status: found || !missing.length ? ("ok" as const) : ("warn" as const) };
+      });
+    }
+    if (what.speakers) await run.output("Speakers", `/events/${eventId}/speakers`, "page");
+    if (what.sponsors) await run.output("Sponsors", `/events/${eventId}/sponsors`, "page");
+    const summary = run.steps.filter((s) => !s.tool.includes("→ save")).map((s) => s.summary).filter(Boolean).join(" ");
+    await run.finish({ event_id: eventId, summary: summary || `Researched ${topic} with Google Search` });
+    return { run_id: run.id, summary };
+  } catch (err) {
+    await run.finish({ error: err instanceof Error ? err.message : String(err), event_id: eventId }, true);
+    return { run_id: run.id, summary: "Research failed" };
+  }
 }

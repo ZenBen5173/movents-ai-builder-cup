@@ -112,3 +112,60 @@ export async function fetchMedia(url: string) {
   }
   throw new Error("Too many redirects");
 }
+
+/**
+ * The picture a web page offers for sharing (og:image / twitter:image), as
+ * a checked https link: the image must download and be a real image. Used
+ * for speaker photos and supplier pictures from the page Gemini cited.
+ * Null when the page has none, blocks us, or is not public.
+ */
+export async function pageImage(pageUrl: string): Promise<string | null> {
+  return (await pagePreview(pageUrl))?.image ?? null;
+}
+
+/** A page's share picture and title (to check the page is about the person). */
+export async function pagePreview(pageUrl: string): Promise<{ image: string | null; title: string } | null> {
+  try {
+    let current = new URL(pageUrl);
+    let html = "";
+    for (let hop = 0; hop < 4; hop++) {
+      if (current.protocol !== "https:") return null;
+      const res = await get(current);
+      const status = res.statusCode ?? 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        current = new URL(res.headers.location, current);
+        continue;
+      }
+      if (status < 200 || status >= 300 || !String(res.headers["content-type"] ?? "").includes("html")) {
+        res.resume();
+        return null;
+      }
+      // The <head> is enough; stop reading after 400 KB.
+      for await (const chunk of res) {
+        html += (chunk as Buffer).toString("utf8");
+        if (html.length > 400_000 || /<\/head>/i.test(html)) {
+          res.destroy();
+          break;
+        }
+      }
+      break;
+    }
+    const meta = (name: string) =>
+      html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*content=["']([^"']+)["']`, "i"))?.[1] ??
+      html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${name}["']`, "i"))?.[1];
+    const title = (meta("og:title") ?? html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "").replace(/&amp;/g, "&").trim();
+    const raw = meta("og:image") ?? meta("og:image:url") ?? meta("twitter:image") ?? meta("twitter:image:src");
+    if (!raw) return { image: null, title };
+    const img = new URL(raw.replace(/&amp;/g, "&"), current);
+    if (img.protocol !== "https:") return { image: null, title };
+    try {
+      await fetchMedia(img.toString()); // Throws unless it is a real, public image.
+    } catch {
+      return { image: null, title };
+    }
+    return { image: img.toString(), title };
+  } catch {
+    return null;
+  }
+}

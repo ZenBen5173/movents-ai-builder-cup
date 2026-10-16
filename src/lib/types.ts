@@ -132,6 +132,7 @@ export type Speaker = {
 export type Vendor = {
   id: string;
   event_id: string | null;
+  photo_url?: string | null;
   category: string;
   name: string;
   url: string | null;
@@ -152,6 +153,8 @@ export type Vendor = {
 export type BudgetLine = {
   id: string;
   event_id: string;
+  /** Added by hand; kept when the budget is re-drafted. */
+  custom?: boolean;
   category: string;
   description: string;
   vendor_id: string | null;

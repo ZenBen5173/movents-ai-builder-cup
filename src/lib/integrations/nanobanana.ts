@@ -1,4 +1,5 @@
 import "server-only";
+import { geminiEnabled, geminiTarget } from "../ai/gemini";
 
 /**
  * Nano Banana (Gemini image model) — direct path for when the app itself
@@ -6,18 +7,20 @@ import "server-only";
  * generates the image and attaches it back over MCP instead.
  */
 export function nanoBananaEnabled() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return geminiEnabled();
 }
 
 const RATIO: Record<string, string> = { "1080x1350": "4:5", "1080x1080": "1:1", "1080x1920": "9:16", "1200x627": "16:9" };
 
 export async function generateImage(prompt: string, width: number, height: number) {
   const model = process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image";
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  // Vertex AI on Cloud Run (billed to the project), or the Gemini API key locally.
+  const target = await geminiTarget(model);
+  const res = await fetch(target.url, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY! },
+    headers: { "content-type": "application/json", ...target.headers },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: RATIO[`${width}x${height}`] ?? "1:1" } },
     }),
     signal: AbortSignal.timeout(90_000),

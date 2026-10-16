@@ -203,6 +203,36 @@ export async function setFunding(lineId: string, funding: string) {
   }, ["/events"]);
 }
 
+const LINE_CATEGORIES = ["Food & beverage", "Venue", "Merchandise", "Speakers", "Marketing", "Logistics", "AV / Tech", "Prizes", "Other"];
+
+/** A budget item the committee adds by hand. Kept when the budget is re-drafted. */
+export async function addBudgetLine(eventId: string, input: { category: string; description: string; qty: number; unit_cost: number; funding?: string }) {
+  return wrap(async () => {
+    const user = await onEvent(eventId);
+    const description = str(input.description, 160).trim();
+    const qty = Math.round(Number(input.qty));
+    const unit = Math.round(Number(input.unit_cost) * 100) / 100;
+    if (!description) throw new Error("Say what the item is");
+    if (!(qty > 0 && qty <= 100_000)) throw new Error("Quantity must be at least 1");
+    if (!(unit >= 0 && unit <= 1_000_000)) throw new Error("Enter a price in RM");
+    const category = LINE_CATEGORIES.includes(input.category) ? input.category : "Other";
+    const last = await one<{ s: number }>("SELECT coalesce(max(sort), 0)::int AS s FROM budget_lines WHERE event_id = $1", [eventId]);
+    await insert("budget_lines", { id: id("bl"), event_id: eventId, category, description, vendor_id: null, qty, unit_cost: unit, estimated: Math.round(qty * unit * 100) / 100, funding_source: str(input.funding ?? "Society fund", 80), source_url: null, sort: (last?.s ?? 0) + 1, custom: true });
+    await audit(user, "budget.line_added", { description, qty, unit_cost: unit }, { eventId });
+    return `Added ${description}`;
+  }, ["/events"]);
+}
+
+export async function removeBudgetLine(lineId: string) {
+  return wrap(async () => {
+    const user = await onTeam("budget_lines", lineId);
+    const l = await one<{ event_id: string; description: string; custom: boolean }>("SELECT event_id, description, custom FROM budget_lines WHERE id = $1", [lineId]);
+    if (!l?.custom) throw new Error("Only items you added can be removed; re-run the budget to change the rest");
+    await query("DELETE FROM budget_lines WHERE id = $1", [lineId]);
+    await audit(user, "budget.line_removed", { description: l.description }, { eventId: l.event_id });
+  }, ["/events"]);
+}
+
 export async function rerunBudget(eventId: string) {
   return wrap(async () => {
     const user = await onEvent(eventId);
@@ -248,7 +278,14 @@ export async function addSpeaker(eventId: string, data: { name: string; email: s
 
 export async function findMoreSpeakers(eventId: string) {
   return wrap(async () => {
-    await onEvent(eventId);
+    const user = await onEvent(eventId);
+    // With Gemini: real speakers from Google Search, with photos and profile links.
+    const { geminiEnabled } = await import("@/lib/ai/gemini");
+    if (geminiEnabled()) {
+      const { researchEvent } = await import("@/lib/agent/gemini/orchestrator");
+      const r = await researchEvent(user, eventId, { speakers: true });
+      return r?.summary || "Speakers researched";
+    }
     const r = await T.researchSpeakers(eventId, 3);
     return `${r.speakers.length} speakers (${r.mode})`;
   }, ["/events"]);
@@ -555,7 +592,7 @@ export async function genKit(eventId: string) {
   return wrap(async () => {
     const user = await onEvent(eventId);
     const { generateKit } = await import("@/lib/marketing");
-    const r = await generateKit(eventId, { withImages: true });
+    const r = await generateKit(eventId, { withImages: false });
     await audit(user, "marketing.kit_generated", { creatives: r.creatives.length, mode: r.mode, images: r.generated }, { eventId });
     return r.errors.length ? `Kit refreshed; ${r.errors.length} image(s) failed: ${r.errors[0]}` : `Marketing kit ready (${r.mode === "nano-banana" ? `${r.generated} Nano Banana images` : "template images"})`;
   }, ["/events"]);

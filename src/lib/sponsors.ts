@@ -68,7 +68,17 @@ export async function findSponsors(eventId: string, limit = 6) {
   );
 }
 
-export type SponsorInput = { company: string; industry?: string | null; website?: string | null; contact_name?: string | null; contact_email?: string | null; ask?: string | null; fit_reason?: string | null };
+export type SponsorInput = { company: string; industry?: string | null; website?: string | null; contact_name?: string | null; contact_email?: string | null; ask?: string | null; fit_reason?: string | null; logo_url?: string | null };
+
+/** A company's logo from its website's icon (Google's favicon service), when no logo was given. */
+export function logoFor(website: string | null | undefined) {
+  try {
+    const host = website ? new URL(website).hostname : null;
+    return host ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128` : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Insert sponsors, skipping companies the event already has. */
 export async function saveSponsors(eventId: string, rows: SponsorInput[], source = "assistant") {
@@ -85,6 +95,7 @@ export async function saveSponsors(eventId: string, rows: SponsorInput[], source
         company,
         industry: clip(r.industry, 80),
         website: /^https?:\/\//i.test(String(r.website ?? "").trim()) ? clip(r.website, 500) : null,
+        logo_url: /^https:\/\//i.test(String(r.logo_url ?? "")) ? clip(r.logo_url, 1000) : logoFor(/^https?:\/\//i.test(String(r.website ?? "").trim()) ? String(r.website).trim() : null),
         contact_name: clip(r.contact_name, 120),
         contact_email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(r.contact_email ?? "").trim()) ? clip(r.contact_email, 254) : null,
         ask: clip(r.ask, 200),

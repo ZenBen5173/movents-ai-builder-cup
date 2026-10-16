@@ -31,6 +31,7 @@ import { loadBundle, budgetTotals, validateProposal, reportData, type ProposalTe
 import type { BudgetLine, EventRow, Speaker, University, User, Vendor, Venue } from "../types";
 import { addMembers, resolvePeople, visibleSql } from "../members";
 import { agentContext } from "./context";
+import { vendorPhoto } from "../vendor-photos";
 
 export async function eventContext(eventId: string) {
   const ev = await one<EventRow>("SELECT * FROM events WHERE id = $1", [eventId]);
@@ -242,9 +243,11 @@ export async function researchSpeakers(eventId: string, count = 3) {
 /** The AI assistant's web research lands here. */
 export async function saveSpeakers(eventId: string, list: Partial<SpeakerCandidate>[]) {
   await query("DELETE FROM speakers WHERE event_id = $1 AND source = 'sample'", [eventId]);
+  const have = new Set((await query<{ name: string }>("SELECT name FROM speakers WHERE event_id = $1", [eventId])).map((r) => r.name.toLowerCase()));
   const rows: Speaker[] = [];
-  for (const c of list.filter((x) => x.name)) {
-    rows.push(await insert<Speaker>("speakers", { id: id("spk"), event_id: eventId, name: c.name, headline: c.headline ?? null, source_url: c.source_url ?? null, email: c.email ?? null, fit_reason: c.fit_reason ?? null, status: "found", source: "assistant" }));
+  for (const c of list.filter((x) => x.name && !have.has(String(x.name).toLowerCase()))) {
+    const photo = /^https:\/\//i.test(String(c.photo_url ?? "")) ? String(c.photo_url).slice(0, 1000) : null;
+    rows.push(await insert<Speaker>("speakers", { id: id("spk"), event_id: eventId, name: c.name, headline: c.headline ?? null, source_url: c.source_url ?? null, email: c.email ?? null, fit_reason: c.fit_reason ?? null, photo_url: photo, status: "found", source: "assistant" }));
   }
   return rows;
 }
@@ -252,7 +255,8 @@ export async function saveSpeakers(eventId: string, list: Partial<SpeakerCandida
 export async function saveSupplierQuotes(eventId: string, list: Partial<SupplierCandidate>[]) {
   const out: Vendor[] = [];
   for (const c of list.filter((x) => x.name && x.category && x.unit_price != null)) {
-    out.push(await insert<Vendor>("vendors", { id: id("vnd"), event_id: eventId, category: c.category, name: c.name, url: c.url ?? null, unit: c.unit ?? "unit", unit_price: Number(c.unit_price), quote: null, rating: null, snippet: c.snippet ?? null, source: "assistant", contract_status: "quoted" }));
+    const photo = /^https:\/\//i.test(String(c.photo_url ?? "")) ? String(c.photo_url).slice(0, 1000) : null;
+    out.push(await insert<Vendor>("vendors", { id: id("vnd"), event_id: eventId, category: c.category, name: c.name, url: c.url ?? null, unit: c.unit ?? "unit", unit_price: Number(c.unit_price), quote: null, rating: null, snippet: c.snippet ?? null, photo_url: photo, source: "assistant", contract_status: "quoted" }));
   }
   return out;
 }
@@ -280,7 +284,7 @@ export async function researchSuppliers(eventId: string) {
     modes[cat.key] = live.length ? "assistant" : "reference";
     out[cat.key] = [...live];
     if (live.length >= 2) continue;
-    for (const c of referenceSuppliers(cat.key)) {
+    for (const [i, c] of referenceSuppliers(cat.key).entries()) {
       // Society's own rating from the vendor registry, when we have used them before.
       const known = registry.find((v) => v.name === c.name || (host(v.url) && host(v.url) === host(c.url) && v.category === c.category));
       out[cat.key].push(
@@ -295,6 +299,7 @@ export async function researchSuppliers(eventId: string) {
           quote: null,
           rating: known?.rating ?? null,
           snippet: c.snippet,
+          photo_url: vendorPhoto(cat.key, i),
           source: c.source,
           contract_status: "quoted",
         }),
@@ -311,6 +316,9 @@ export async function draftBudget(eventId: string, signals: LessonSignals) {
   const venue = ev.venue_id ? await one<Venue>("SELECT * FROM venues WHERE id = $1", [ev.venue_id]) : null;
   const vendors = await query<Vendor>("SELECT * FROM vendors WHERE event_id = $1 AND unit_price IS NOT NULL", [eventId]);
   const speakers = await query<Speaker>("SELECT * FROM speakers WHERE event_id = $1", [eventId]);
+  // Items the committee added by hand stay; the rest of the budget fits in what is left of the cap.
+  const custom = await query<{ estimated: number }>("SELECT estimated FROM budget_lines WHERE event_id = $1 AND custom = true", [eventId]);
+  const customTotal = custom.reduce((n, l) => n + Number(l.estimated), 0) * (1 + sop.budget_rules.contingency_pct / 100);
   const suppliers: Record<string, Supplier[]> = {};
   for (const v of vendors) (suppliers[v.category] ??= []).push({ id: v.id, category: v.category, name: v.name, url: v.url, unit_price: v.unit_price!, rating: v.rating, unit: v.unit ?? "unit" });
   const showRate = signals.show_rate ?? 0.75;
@@ -318,7 +326,7 @@ export async function draftBudget(eventId: string, signals: LessonSignals) {
   const result = composeBudget({
     pax: ev.pax,
     predicted: pred.predicted,
-    cap: ev.budget_cap,
+    cap: Math.max(0, ev.budget_cap - customTotal),
     contingencyPct: sop.budget_rules.contingency_pct,
     foodBufferPct: sop.budget_rules.food_buffer_pct,
     suppliers,
@@ -329,7 +337,7 @@ export async function draftBudget(eventId: string, signals: LessonSignals) {
     lanyardsForAttendees: signals.lanyards_attendees ?? true,
     preferred: ((ev as unknown as { preferences?: { suppliers?: string[] } }).preferences?.suppliers) ?? [],
   });
-  await query("DELETE FROM budget_lines WHERE event_id = $1", [eventId]);
+  await query("DELETE FROM budget_lines WHERE event_id = $1 AND custom = false", [eventId]);
   await query("UPDATE vendors SET selected = false WHERE event_id = $1", [eventId]);
   let sort = 0;
   for (const l of result.final.lines) {

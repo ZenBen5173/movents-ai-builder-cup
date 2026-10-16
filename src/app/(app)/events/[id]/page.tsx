@@ -72,7 +72,7 @@ export default async function ProjectOverview({ params }: { params: Promise<{ id
 
       <div className="grid gap-12 lg:grid-cols-[1.25fr_1fr]">
         <Card title="Up next" actions={<Link href={`/events/${id}/tasks`} className="text-xs font-medium text-tomato-ink hover:underline">All tasks</Link>}>
-          <UpNext
+          <UpNext eventId={id}
             items={upNext.map((x) => ({
               id: x.id,
               title: x.title.replace(/^SOP: /, ""),

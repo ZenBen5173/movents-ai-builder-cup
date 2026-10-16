@@ -1,6 +1,7 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ type Item = { id: string; title: string; due: string; overdue: boolean; blockedB
 const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 /** Checkbox, title, date. Blocked shows as a lock; hover it to see why. */
-export function UpNext({ items }: { items: Item[] }) {
+export function UpNext({ items, eventId }: { items: Item[]; eventId: string }) {
   const [, start] = useTransition();
   const router = useRouter();
   const [list, set] = useOptimistic(items, (s, id: string) => s.map((i) => (i.id === id ? { ...i, done: !i.done } : i)));
@@ -37,7 +38,9 @@ export function UpNext({ items }: { items: Item[] }) {
           >
             {x.done && <Check className="size-3" />}
           </button>
-          <span className={cn("min-w-0 flex-1 truncate text-[14.5px]", x.done && "text-muted-foreground line-through")}>{x.title}</span>
+          <Link href={`/events/${eventId}/tasks?task=${x.id}`} title="Open the task" className={cn("group/t min-w-0 flex-1 truncate text-[14.5px] underline-offset-4 transition-colors hover:text-tomato-ink hover:underline", x.done && "text-muted-foreground line-through")}>
+            {x.title}
+          </Link>
           {x.blockedBy.length > 0 && (
             <span className="group relative text-muted-foreground">
               <Icon name="lock" size={14} />

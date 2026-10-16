@@ -53,7 +53,14 @@ export default async function SuppliersPage({ params }: { params: Promise<{ id: 
                 <tr key={v.id} className="group border-b border-border align-middle transition-colors last:border-b-0 hover:bg-sand/30">
                   <td className="px-4 py-3">
                     <span className="flex items-center gap-2.5">
-                      <span className="grid size-8 place-items-center rounded-lg border-[1.5px] border-ink bg-sand transition-transform group-hover:-rotate-6"><I className="size-4" /></span>
+                      {v.photo_url ? (
+                        <span className="relative size-11 shrink-0 overflow-hidden rounded-lg border-[1.5px] border-ink bg-sand transition-transform group-hover:-rotate-3">
+                          <img src={v.photo_url} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                          <span className="absolute bottom-0.5 right-0.5 grid size-4 place-items-center rounded bg-card/90"><I className="size-2.5" /></span>
+                        </span>
+                      ) : (
+                        <span className="grid size-8 place-items-center rounded-lg border-[1.5px] border-ink bg-sand transition-transform group-hover:-rotate-6"><I className="size-4" /></span>
+                      )}
                       {CAT_LABEL[v.category] ?? v.category}
                     </span>
                   </td>

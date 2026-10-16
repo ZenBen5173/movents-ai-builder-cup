@@ -101,6 +101,7 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
     if (o.status === "failed") return { status: "fail", summary: String(o.error ?? "failed") };
     if (o.status === "executed") return { status: "ok", summary: String(o.reason ?? "executed") };
     if (typeof o.chosen === "string") return { status: "ok", summary: o.chosen };
+    if (typeof o.saved === "number") return { status: o.saved ? "ok" : "warn", summary: `${o.saved} saved` };
     if (Array.isArray(o.speakers) && o.suppliers && typeof o.suppliers === "object") return { status: "ok", summary: `${(o.speakers as string[]).length} speakers; suppliers: ${Object.entries(o.suppliers as Record<string, string[]>).map(([k, v]) => `${k} ${v.length}`).join(", ")}` };
     if (Array.isArray(o.speakers)) return { status: o.mode === "live" ? "ok" : "warn", summary: `${(o.speakers as { name: string }[]).map((s) => s.name).join(", ")} (${String(o.mode)})` };
     if (typeof o.tasks === "number") return { status: "ok", summary: `${o.tasks} tasks across 5 phases` };
@@ -109,7 +110,6 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
     if (typeof o.count === "number") return { status: "ok", summary: `${o.count} risks` };
     if (Array.isArray(o.written)) return { status: "ok", summary: `Wrote ${(o.written as string[]).join(", ")}` };
     if (typeof o.added === "number" && Array.isArray(o.risks)) return { status: "ok", summary: `${o.added} event-specific risk(s) added: ${(o.risks as { category: string; score: number }[]).map((r) => `${r.category} (score ${r.score})`).join(", ")}` };
-    if (typeof o.saved === "number") return { status: o.saved ? "ok" : "warn", summary: `${o.saved} saved` };
     if (typeof o.runsheetBlocks === "number") return { status: "ok", summary: `${o.runsheetBlocks} run-sheet blocks, ${String(o.promoItems)} promo tasks, ${String(o.reminders)} reminders` };
     return { status: "ok", summary: JSON.stringify(o).slice(0, 160) };
   }
@@ -189,7 +189,7 @@ const ALL_TOOLS: Tool[] = [
   {
     name: "save_sponsors",
     description: "Save sponsors you found with your own web search (local companies that fit the event topic: tech, banks, telcos, F&B...). Skips companies already on the event. If you cannot search the web, skip this step. Sponsors UI: /events/<event_id>/sponsors.",
-    inputSchema: { type: "object", properties: { ...ev, sponsors: { type: "array", items: { type: "object", properties: { company: str("Company name"), website: str("Company website"), contact_name: str("Contact person, if found"), contact_email: str("Partnerships / marketing email, if public"), industry: str("e.g. Banking, Technology, F&B, Telco"), ask: str('What to ask for, e.g. "RM3,000" or "Coffee for 150 pax"'), fit_reason: str("Why they fit this event") }, required: ["company"] } }, ...runId }, required: ["event_id", "sponsors"] },
+    inputSchema: { type: "object", properties: { ...ev, sponsors: { type: "array", items: { type: "object", properties: { company: str("Company name"), website: str("Company website"), contact_name: str("Contact person, if found"), contact_email: str("Partnerships / marketing email, if public"), industry: str("e.g. Banking, Technology, F&B, Telco"), ask: str('What to ask for, e.g. "RM3,000" or "Coffee for 150 pax"'), fit_reason: str("Why they fit this event"), logo_url: str("https link to their logo, if known") }, required: ["company"] } }, ...runId }, required: ["event_id", "sponsors"] },
     run: (a, u) => traced(u, a, "Save sponsors from web search", "save_sponsors", async () => { const r = await saveSponsors(String(a.event_id), (a.sponsors as SponsorInput[]) ?? []); return { saved: r.length, sponsors: r.map((s) => ({ sponsor_id: s.id, company: s.company })) }; }),
   },
   {
@@ -404,13 +404,13 @@ const ALL_TOOLS: Tool[] = [
   {
     name: "save_speakers",
     description: "Save speakers you found with your own web search (name, headline, profile URL, email if public). Replaces placeholder speakers. If you cannot search the web, skip this step and tell the user to add speakers on the Speakers page.",
-    inputSchema: { type: "object", properties: { ...ev, speakers: { type: "array", items: { type: "object", properties: { name: str("Full name"), headline: str("Role / organisation"), source_url: str("Profile or source page"), email: str("Public email, if any"), fit_reason: str("Why they fit") }, required: ["name"] } }, ...runId }, required: ["event_id", "speakers"] },
+    inputSchema: { type: "object", properties: { ...ev, speakers: { type: "array", items: { type: "object", properties: { name: str("Full name"), headline: str("Role / organisation"), source_url: str("Profile or source page (LinkedIn when known)"), email: str("Public email, if any"), fit_reason: str("Why they fit"), photo_url: str("https link to their photo, if found") }, required: ["name"] } }, ...runId }, required: ["event_id", "speakers"] },
     run: (a, u) => traced(u, a, "Save speakers from web search", "save_speakers", async () => { const r = await T.saveSpeakers(String(a.event_id), (a.speakers as never[]) ?? []); return { saved: r.length, speakers: r.map((s) => ({ id: s.id, name: s.name })) }; }),
   },
   {
     name: "save_supplier_quotes",
     description: "Save supplier prices you found with your own web search. category: food | tshirt | lanyard | cardholder. unit_price in RM; unit: pax or piece. Always include the source url. If you cannot search the web, skip this: Movents falls back to its supplier registry.",
-    inputSchema: { type: "object", properties: { ...ev, quotes: { type: "array", items: { type: "object", properties: { category: str("food | tshirt | lanyard | cardholder"), name: str("Supplier"), url: str("Source page"), unit_price: { type: "number" }, unit: str("pax | piece"), snippet: str("Evidence text with the price") }, required: ["category", "name", "unit_price", "url"] } }, ...runId }, required: ["event_id", "quotes"] },
+    inputSchema: { type: "object", properties: { ...ev, quotes: { type: "array", items: { type: "object", properties: { category: str("food | tshirt | lanyard | cardholder"), name: str("Supplier"), url: str("Source page"), unit_price: { type: "number" }, unit: str("pax | piece"), snippet: str("Evidence text with the price"), photo_url: str("https link to a picture of the supplier or product") }, required: ["category", "name", "unit_price", "url"] } }, ...runId }, required: ["event_id", "quotes"] },
     run: (a, u) => traced(u, a, "Save supplier quotes from web search", "save_supplier_quotes", async () => {
       const quotes = ((a.quotes as { url?: string }[]) ?? []).filter((q) => /^https?:\/\//i.test(String(q.url ?? "")));
       const r = await T.saveSupplierQuotes(String(a.event_id), quotes as never[]);

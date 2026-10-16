@@ -127,6 +127,7 @@ export async function seedDemoEvents(userId: string) {
       await T.generateOpsPack(ev.id);
       await T.writeProposalText(ev.id, s.proposal);
       await generateKit(ev.id, { withImages: false });
+      await sampleInboxAndMeetings(user, ev.id);
       if (s.ask) {
         const mate = await one<import("./types").User>("SELECT u.id, u.name, u.email, u.phone, m.society_id, m.role, m.department FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.society_id = $1 AND u.name = $2", [user.society_id, s.ask.who]);
         if (mate) {
@@ -139,6 +140,100 @@ export async function seedDemoEvents(userId: string) {
     }
   }
   await audit(user, "demo.seeded", { events: SAMPLE_EVENTS.length }, { societyId: user.society_id });
+  // Then Gemini finds real speakers (with photos) and sponsors for each, in the background.
+  const { geminiEnabled } = await import("./ai/gemini");
+  if (geminiEnabled()) {
+    const { researchEvent } = await import("./agent/gemini/orchestrator");
+    const ids = await query<{ id: string }>("SELECT id FROM events WHERE society_id = $1 ORDER BY created_at", [user.society_id]);
+    await Promise.allSettled(ids.map((e) => researchEvent(user, e.id)));
+  }
+}
+
+/**
+ * A sample event's paper trail, so no tab is empty: emails the committee has
+ * sent (to placeholder .example addresses, never real ones) and meetings, a
+ * past kick-off with minutes and action items that became tasks, and the
+ * next weekly sync.
+ */
+async function sampleInboxAndMeetings(user: import("./types").User, eventId: string) {
+  const { emailShell } = await import("./integrations/email");
+  const { fmtDate } = await import("./appurl");
+  const M = await import("./meetings");
+  const ev = await one<{ title: string; date: string; start_time: string; end_time: string; pax: number; venue: string | null }>(
+    "SELECT e.title, e.date, e.start_time, e.end_time, e.pax, v.name AS venue FROM events e LEFT JOIN venues v ON v.id = e.venue_id WHERE e.id = $1",
+    [eventId],
+  );
+  if (!ev) return;
+  const food = await one<{ name: string; unit_price: number }>("SELECT name, unit_price FROM vendors WHERE event_id = $1 AND category = 'food' AND selected = true LIMIT 1", [eventId]);
+  const team = await query<{ user_id: string; name: string }>("SELECT m.user_id, u.name FROM event_members m JOIN users u ON u.id = m.user_id WHERE m.event_id = $1 ORDER BY m.added_at", [eventId]);
+  const day = (n: number) => new Date(Date.now() + n * 86_400_000);
+  const iso = (d: Date) => new Date(d.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
+  const mails = [
+    {
+      kind: "other",
+      to: "facilities.booking@university.example",
+      subject: `Venue booking request: ${ev.venue ?? "venue"}, ${fmtDate(ev.date)}`,
+      html: emailShell("Venue booking request", `<p>Dear Facilities team,</p><p>We would like to book <b>${ev.venue ?? "a lecture theatre"}</b> for <b>${ev.title}</b> on ${fmtDate(ev.date)}, ${ev.start_time} to ${ev.end_time}, for about ${ev.pax} participants, with a projector and two wireless mics.</p><p>Thank you,<br>${user.name}</p>`),
+      ago: 5,
+    },
+    {
+      kind: "vendor_quote",
+      to: "quotes@caterer.example",
+      subject: `Quotation request, ${ev.title} (${fmtDate(ev.date)})`,
+      html: emailShell("Quotation request", `<p>Hello ${food?.name.split(" — ")[0] ?? "catering"} team,</p><p>Could you quote halal packed meals for about ${ev.pax} people on ${fmtDate(ev.date)}? Your listed price is around RM${food?.unit_price ?? 15} per pax. Please confirm availability, final price and delivery time.</p><p>Thank you,<br>${user.name}</p>`),
+      ago: 3,
+    },
+    {
+      kind: "attendee_reminder",
+      to: "members@society.example",
+      subject: `Save the date: ${ev.title}`,
+      html: emailShell(ev.title, `<p>Hi everyone,</p><p>Save the date: <b>${ev.title}</b> is on ${fmtDate(ev.date)} at ${ev.venue ?? "campus"}. Registration opens next week; spots are limited to ${ev.pax}.</p><p>See you there!</p>`),
+      ago: 1,
+    },
+  ];
+  for (const m of mails) {
+    await query(
+      "INSERT INTO emails (id, event_id, kind, to_addr, intended_to, subject, body, status, provider, sent_by, sent_at, created_at) VALUES ($1, $2, $3, $4, $4, $5, $6, 'sent', 'demo', $7, $8, $8)",
+      [id("eml"), eventId, m.kind, m.to, m.subject, m.html, user.id, day(-m.ago)],
+    );
+  }
+  const attendees = team.map((t) => t.user_id);
+  const owner = (i: number) => team[i % Math.max(1, team.length)]?.user_id ?? user.id;
+  const kickoff = await M.createMeetingRecord(user, eventId, {
+    title: "Kick-off",
+    date: iso(day(-4)),
+    time: "20:00",
+    duration_min: 45,
+    meeting_url: "https://meet.google.com/demo-kickoff",
+    attendees,
+    agenda: ["Goals and audience", "Budget cap and funding", "Speakers shortlist", "Who owns what"],
+  });
+  await M.recordMinutes(user, kickoff.id, {
+    minutes: `## Goals
+- Run ${ev.title} for about ${ev.pax} students on ${fmtDate(ev.date)}.
+## Budget
+- Stay inside the cap; ask sponsors to cover food.
+## Speakers
+- Shortlist from the Speakers tab; invites go out this week.`,
+    decisions: [`Venue: ${ev.venue ?? "to be booked"}`, "Halal catering only", "Registration through the event page"],
+    action_items: [
+      { text: "Send the venue booking request to Facilities", owner_id: owner(0), due_date: iso(day(2)) },
+      { text: "Confirm the caterer's quote", owner_id: owner(1), due_date: iso(day(5)) },
+      { text: "Draft the poster and social posts", owner_id: owner(2), due_date: iso(day(7)) },
+    ],
+    attended: attendees,
+    create_tasks: true,
+    mark_done: true,
+  });
+  await M.createMeetingRecord(user, eventId, {
+    title: "Weekly sync",
+    date: iso(day(3)),
+    time: "20:30",
+    duration_min: 30,
+    meeting_url: "https://meet.google.com/demo-weekly",
+    attendees,
+    agenda: ["Venue confirmed?", "Speaker replies", "Sponsor replies", "Promotion plan"],
+  });
 }
 
 /** How far the sample events are, for the setting-up screen. */

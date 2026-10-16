@@ -47,6 +47,13 @@ export async function findSponsorsAction(eventId: string): Promise<Res> {
   try {
     const user = await requireUser();
     await assertMember(user, eventId);
+    const { geminiEnabled } = await import("@/lib/ai/gemini");
+    if (geminiEnabled()) {
+      const { researchEvent } = await import("@/lib/agent/gemini/orchestrator");
+      const r = await researchEvent(user, eventId, { sponsors: true });
+      refresh(eventId);
+      return { ok: true, message: r?.summary || "Sponsors researched" };
+    }
     const rows = await findSponsors(eventId);
     await audit(user, "sponsor.found", { companies: rows.map((r) => r.company) }, { eventId });
     refresh(eventId);

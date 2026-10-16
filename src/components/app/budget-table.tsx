@@ -3,14 +3,15 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import { setActual, setFunding } from "@/app/actions";
+import { addBudgetLine, removeBudgetLine, setActual, setFunding } from "@/app/actions";
 import { cn } from "@/lib/utils";
 import type { BudgetLine } from "@/lib/types";
 
 const rm = (n: number | null | undefined) => (n == null ? "" : n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const FUNDING = ["Society fund", "Student LIFE subsidy", "Faculty grant", "Sponsorship", "Ticket sales"];
+const CATEGORIES = ["Food & beverage", "Venue", "Merchandise", "Speakers", "Marketing", "Logistics", "AV / Tech", "Prizes", "Other"];
 
 function ActualCell({ line }: { line: BudgetLine }) {
   const [v, setV] = useState(line.actual?.toString() ?? "");
@@ -43,7 +44,63 @@ function ActualCell({ line }: { line: BudgetLine }) {
   );
 }
 
-export function BudgetTable({ lines, totals }: { lines: (BudgetLine & { vendor: string | null })[]; totals: { subtotal: number; contingency: number; total: number; actual: number; cap: number; pct: number } }) {
+/** One row at the foot of the table to add your own item. */
+function AddLine({ eventId }: { eventId: string }) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState("Other");
+  const [description, setDescription] = useState("");
+  const [qty, setQty] = useState("1");
+  const [unit, setUnit] = useState("");
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const total = (Number(qty) || 0) * (Number(unit) || 0);
+  function save() {
+    start(async () => {
+      const r = await addBudgetLine(eventId, { category, description, qty: Number(qty), unit_cost: Number(unit) });
+      if (!r.ok) return void toast.error(r.error);
+      toast.success(r.message ?? "Added");
+      setDescription("");
+      setQty("1");
+      setUnit("");
+      router.refresh();
+    });
+  }
+  if (!open)
+    return (
+      <tr>
+        <td colSpan={7} className="py-2">
+          <motion.button type="button" whileHover={{ x: 2 }} onClick={() => setOpen(true)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-tomato-ink transition-colors hover:bg-tomato/10">
+            <Plus className="size-4" /> Add an item
+          </motion.button>
+        </td>
+      </tr>
+    );
+  return (
+    <motion.tr initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="border-b border-border bg-sun-soft/40">
+      <td className="py-2 pr-3">
+        <div className="flex flex-col gap-1">
+          <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" className="h-7 w-40 rounded-md border border-border bg-card px-1 text-xs">
+            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <input autoFocus value={description} onChange={(e) => setDescription(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="e.g. Photographer, prizes, transport" className="h-8 w-full rounded-md border border-border bg-card px-2 text-sm outline-none focus:border-ink" />
+        </div>
+      </td>
+      <td className="py-2 pr-3 text-right"><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" aria-label="Quantity" className="h-8 w-16 rounded-md border border-border bg-card px-2 text-right tabular outline-none focus:border-ink" /></td>
+      <td className="py-2 pr-3 text-right"><input value={unit} onChange={(e) => setUnit(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} inputMode="decimal" placeholder="0.00" aria-label="Unit price in RM" className="h-8 w-24 rounded-md border border-border bg-card px-2 text-right tabular outline-none focus:border-ink" /></td>
+      <td className="py-2 pr-3 text-right tabular text-muted-foreground">{total ? rm(total) : ""}</td>
+      <td colSpan={3} className="py-2">
+        <div className="flex items-center justify-end gap-1.5">
+          <button type="button" onClick={() => setOpen(false)} className="h-8 rounded-lg px-2 text-xs text-muted-foreground hover:text-ink">Cancel</button>
+          <motion.button type="button" whileTap={{ scale: 0.95 }} disabled={pending || !description.trim() || !unit} onClick={save} className="flex h-8 items-center gap-1.5 rounded-lg border-[1.5px] border-ink bg-tomato px-3 text-xs font-semibold shadow-[2px_2px_0_0_#161514] disabled:opacity-40">
+            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Add
+          </motion.button>
+        </div>
+      </td>
+    </motion.tr>
+  );
+}
+
+export function BudgetTable({ eventId, lines, totals }: { eventId: string; lines: (BudgetLine & { vendor: string | null })[]; totals: { subtotal: number; contingency: number; total: number; actual: number; cap: number; pct: number } }) {
   const router = useRouter();
   return (
     <div className="overflow-x-auto">
@@ -68,6 +125,22 @@ export function BudgetTable({ lines, totals }: { lines: (BudgetLine & { vendor: 
                   <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{l.category}</div>
                   <div className="flex items-center gap-1.5">
                     {l.description}
+                    {l.custom && <span className="rounded bg-ink/5 px-1 text-[10px] text-muted-foreground">added by you</span>}
+                    {l.custom && (
+                      <button
+                        type="button"
+                        title="Remove this item"
+                        aria-label={`Remove ${l.description}`}
+                        onClick={async () => {
+                          const r = await removeBudgetLine(l.id);
+                          if (!r.ok) toast.error(r.error);
+                          router.refresh();
+                        }}
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                      >
+                        <X className="size-3.5 text-muted-foreground hover:text-ink" />
+                      </button>
+                    )}
                     {l.source_url && (
                       <a href={l.source_url} target="_blank" rel="noreferrer" className="opacity-0 transition-opacity group-hover:opacity-100" title="Supplier quote">
                         <ExternalLink className="size-3.5 text-primary" />
@@ -95,6 +168,7 @@ export function BudgetTable({ lines, totals }: { lines: (BudgetLine & { vendor: 
               </motion.tr>
             );
           })}
+          <AddLine eventId={eventId} />
         </tbody>
         <tfoot className="border-t-[1.5px] border-ink bg-sand/50 text-sm [&_td:first-child]:pl-3">
           <tr><td colSpan={3} className="py-1.5 pr-3 text-right text-muted-foreground">Subtotal</td><td className="py-1.5 pr-3 text-right tabular">{rm(totals.subtotal)}</td><td className="py-1.5 pr-3 text-right tabular">{rm(totals.actual)}</td><td colSpan={2} /></tr>
