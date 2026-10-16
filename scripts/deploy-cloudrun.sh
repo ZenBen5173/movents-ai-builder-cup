@@ -8,7 +8,6 @@
 # Needs: gcloud signed in (gcloud auth login), billing on the project.
 # GEMINI_API_KEY and CLOUD_DATABASE_URL are read from .env.local when not set in the shell.
 set -euo pipefail
-export MSYS_NO_PATHCONV=1 # Git Bash on Windows: leave "/api/..." arguments alone.
 
 PROJECT="${PROJECT:-ai-builder-cup-511813}"
 REGION="${REGION:-asia-southeast1}"
