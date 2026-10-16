@@ -243,7 +243,7 @@ export type AgentRun = {
   event_id: string | null;
   prompt: string;
   kind: "plan" | "report" | "custom";
-  source: "builtin" | "assistant";
+  source: "builtin" | "assistant" | "gemini";
   status: "running" | "done" | "failed";
   steps: AgentStep[];
   outputs: AgentOutput[];

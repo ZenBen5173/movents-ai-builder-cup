@@ -37,8 +37,16 @@ export class Run {
     return r;
   }
 
-  private async save(extra: Record<string, unknown> = {}) {
-    await update("agent_runs", this.id, { steps: this.steps, outputs: this.outputs, event_id: this.eventId, ...extra });
+  private saving: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Writes go one at a time, each with the state as it is when it runs, so
+   * agents working in parallel on this run never leave an older snapshot last.
+   */
+  private save(extra: Record<string, unknown> = {}) {
+    const next = this.saving.catch(() => null).then(() => update("agent_runs", this.id, { steps: this.steps, outputs: this.outputs, event_id: this.eventId, ...extra }));
+    this.saving = next;
+    return next;
   }
 
   async setEvent(eventId: string) {

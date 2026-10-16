@@ -27,7 +27,7 @@ import { weatherFor } from "../integrations/weather";
 import { emailShell } from "../integrations/email";
 import { forwardNote, vendorRecipient } from "../vendor-contact";
 import { lumaGuests, lumaMode, meetupGuests, meetupMode } from "../integrations/ticketing";
-import { loadBundle, budgetTotals, validateProposal, reportData } from "../docs/builders";
+import { loadBundle, budgetTotals, validateProposal, reportData, type ProposalText } from "../docs/builders";
 import type { BudgetLine, EventRow, Speaker, University, User, Vendor, Venue } from "../types";
 import { addMembers, resolvePeople, visibleSql } from "../members";
 
@@ -369,6 +369,41 @@ export async function generateOpsPack(eventId: string) {
     await insert("volunteers", { id: id("vol"), event_id: eventId, name: `Volunteer ${i + 1} (to assign)`, role: roles[i], phone: null, shift: `${addMin(ev.start_time, -45)} to ${addMin(ev.end_time, 15)}`, emergency: false });
   }
   return { runsheetBlocks: rs.length, promoItems: PROMO_CHANNELS.length, reminders: REMINDER_CADENCE.length, volunteers: people.length + roles.length };
+}
+
+/** Event-specific proposal wording (overview, objectives, outcomes, audience). Only the fields given change. */
+export async function writeProposalText(eventId: string, text: ProposalText) {
+  const ev = await one<{ preferences: Record<string, unknown> | null }>("SELECT preferences FROM events WHERE id = $1", [eventId]);
+  const clean = (s: unknown, max: number) => (typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined);
+  const prev = ((ev?.preferences ?? {}).proposal ?? {}) as ProposalText;
+  const next: ProposalText = {
+    overview: clean(text.overview, 1500) ?? prev.overview,
+    objectives: Array.isArray(text.objectives) && text.objectives.length ? text.objectives.map((o) => clean(o, 300)).filter((o): o is string => Boolean(o)).slice(0, 8) : prev.objectives,
+    outcomes: clean(text.outcomes, 800) ?? prev.outcomes,
+    audience: clean(text.audience, 800) ?? prev.audience,
+  };
+  await update("events", eventId, { preferences: { ...(ev?.preferences ?? {}), proposal: next } });
+  return { written: Object.entries(next).filter(([, v]) => v && (!Array.isArray(v) || v.length)).map(([k]) => k), proposal: next };
+}
+
+export type RiskInput = { category: string; description: string; likelihood: number; impact: number; mitigation: string; contingency?: string };
+
+/** Extra risks specific to this event, on top of the generated register. Same category + description is not added twice. */
+export async function addRisks(eventId: string, list: RiskInput[]) {
+  const { ev } = await eventContext(eventId);
+  const pick = await ownerPicker(eventId, ev.society_id);
+  const have = await query<{ category: string; description: string }>("SELECT category, description FROM risks WHERE event_id = $1", [eventId]);
+  const clamp = (n: unknown) => Math.min(5, Math.max(1, Math.round(Number(n) || 3)));
+  const added: { id: string; category: string; score: number }[] = [];
+  for (const r of list.filter((x) => x.category && x.description && x.mitigation).slice(0, 6)) {
+    if (have.some((h) => h.category === r.category && h.description === r.description)) continue;
+    const riskId = id("rsk");
+    const likelihood = clamp(r.likelihood);
+    const impact = clamp(r.impact);
+    await insert("risks", { id: riskId, event_id: eventId, category: r.category.slice(0, 60), description: r.description.slice(0, 500), likelihood, impact, mitigation: r.mitigation.slice(0, 800), contingency: r.contingency?.slice(0, 500) ?? null, owner_id: pick("committee")?.id ?? null, status: "open", mitigation_task_id: null });
+    added.push({ id: riskId, category: r.category, score: likelihood * impact });
+  }
+  return { added: added.length, risks: added };
 }
 
 function addMin(t: string, m: number) {

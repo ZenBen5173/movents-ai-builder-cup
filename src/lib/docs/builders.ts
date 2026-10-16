@@ -51,24 +51,34 @@ function owner(users: User[], role: string) {
 
 // ------------------------------------------------------------------ proposal
 
+export type ProposalText = { overview?: string; objectives?: string[]; outcomes?: string; audience?: string };
+
+/** Proposal wording the AI proposal agent wrote for this event (kept in events.preferences). */
+export function proposalText(event: EventRow): ProposalText {
+  const p = (event as EventRow & { preferences?: { proposal?: ProposalText } }).preferences?.proposal;
+  return p && typeof p === "object" ? p : {};
+}
+
 export function proposalSections(b: NonNullable<Bundle>): DocModel["sections"] {
   const { event, venue, university, speakers, lines, risks, users, runsheet, promo, tasks, society } = b;
   const sop = university!.sop;
   const t = budgetTotals(lines, sop.budget_rules.contingency_pct);
   const pres = users.find((u) => u.role === "president");
   const adv = users.find((u) => u.role === "faculty_advisor");
+  // Event-specific wording written by the proposal agent, when it has run.
+  const written = proposalText(event);
 
   const builders: Record<string, () => Block[]> = {
     overview: () => [
       { type: "kv", rows: [["Event", event.title], ["Organiser", society?.name ?? ""], ["Date", fmtDate(event.date)], ["Time", `${event.start_time} to ${event.end_time}`], ["Venue", venue ? `${venue.name} (${venue.location ?? ""}), capacity ${venue.capacity}` : "TBC"], ["Format", event.setup_style ? `${event.setup_style} seating` : "Talk"]] },
-      { type: "p", text: `${society?.name ?? "The society"} proposes to organise ${event.title}, ${/^[aeiou]/i.test(event.topic ?? "") ? "an" : "a"} ${event.topic ?? ""} session for ${event.pax} students on ${fmtDate(event.date)}.` },
+      { type: "p", text: written.overview ?? `${society?.name ?? "The society"} proposes to organise ${event.title}, ${/^[aeiou]/i.test(event.topic ?? "") ? "an" : "a"} ${event.topic ?? ""} session for ${event.pax} students on ${fmtDate(event.date)}.` },
     ],
     objectives: () => [
-      { type: "bullets", items: [`Introduce students to current developments in ${event.topic ?? "the field"} from practitioners.`, "Connect students with industry and research speakers for mentorship and internships.", "Build practical understanding through live demos and open Q&A.", "Grow society membership and cross-faculty participation."] },
-      { type: "p", text: "Learning outcomes: participants can explain key concepts, identify career pathways, and apply at least one tool or method shown in the session." },
+      { type: "bullets", items: written.objectives?.length ? written.objectives : [`Introduce students to current developments in ${event.topic ?? "the field"} from practitioners.`, "Connect students with industry and research speakers for mentorship and internships.", "Build practical understanding through live demos and open Q&A.", "Grow society membership and cross-faculty participation."] },
+      { type: "p", text: written.outcomes ? `Learning outcomes: ${written.outcomes}` : "Learning outcomes: participants can explain key concepts, identify career pathways, and apply at least one tool or method shown in the session." },
     ],
     target_audience: () => [
-      { type: "p", text: `Target: ${event.pax} undergraduate and postgraduate students across faculties. Registration via Luma/Meetup with waitlist once capacity is reached; dietary and accessibility needs collected at sign-up.` },
+      { type: "p", text: written.audience ?? `Target: ${event.pax} undergraduate and postgraduate students across faculties. Registration via Luma/Meetup with waitlist once capacity is reached; dietary and accessibility needs collected at sign-up.` },
     ],
     programme: () =>
       runsheet.length

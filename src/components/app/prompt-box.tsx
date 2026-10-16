@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowUp, Check, Copy, Loader2, Play } from "lucide-react";
+import { ArrowUp, Check, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Barcode, ROLE_BAND } from "@/components/ep/kit";
 import { parsePrompt } from "@/lib/planning";
@@ -22,10 +22,11 @@ type Person = { id: string; name: string; role: Role; department: string | null 
 const first = (n: string) => n.replace(/^(Dr\.?)\s+/, "").split(/\s+/)[0];
 
 /**
- * Write the brief once: goal, date, pax, budget, team. It goes to your AI assistant
- * (copy) — the assistant runs the plan through Movents over MCP. "Run here" is the offline fallback.
+ * Write the brief once: goal, date, pax, budget, team. With Gemini on the
+ * server, "Plan with Gemini" runs the multi-agent planner here; you can still
+ * copy the brief into your own AI assistant, which plans through Movents over MCP.
  */
-export function PromptBox({ today, people, me }: { today: string; people: Person[]; me: string }) {
+export function PromptBox({ today, people, me, gemini = false }: { today: string; people: Person[]; me: string; gemini?: boolean }) {
   const [prompt, setPrompt] = useState("");
   const [team, setTeam] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -81,7 +82,8 @@ export function PromptBox({ today, people, me }: { today: string; people: Person
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              copy();
+              if (gemini) run();
+              else copy();
             }
           }}
           autoFocus
@@ -125,35 +127,68 @@ export function PromptBox({ today, people, me }: { today: string; people: Person
             {!parsed && <Barcode value={prompt || "movents"} className="h-8 w-28 opacity-25" />}
           </dl>
           <div className="flex shrink-0 items-center gap-2">
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              disabled={busy || !message}
-              onClick={run}
-              title="Run here without an AI assistant"
-              aria-label="Run here"
-              className="grid size-11 place-items-center rounded-xl border-[1.5px] border-ink/25 text-ink/60 transition-colors hover:border-ink hover:text-ink disabled:opacity-30"
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.94 }}
-              whileHover={{ y: -1 }}
-              disabled={!message}
-              onClick={copy}
-              className="flex h-11 items-center gap-2 rounded-xl border-[1.5px] border-ink bg-tomato px-4 text-sm font-semibold shadow-[2px_2px_0_0_#161514] transition-opacity disabled:opacity-40"
-            >
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.span key={copied ? "y" : "n"} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                </motion.span>
-              </AnimatePresence>
-              Copy for AI
-            </motion.button>
+            {gemini ? (
+              <>
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  disabled={!message}
+                  onClick={copy}
+                  title="Copy the brief for your own AI assistant (Claude, ChatGPT, Cursor)"
+                  aria-label="Copy for your AI assistant"
+                  className="grid size-11 place-items-center rounded-xl border-[1.5px] border-ink/25 text-ink/60 transition-colors hover:border-ink hover:text-ink disabled:opacity-30"
+                >
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span key={copied ? "y" : "n"} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                    </motion.span>
+                  </AnimatePresence>
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  whileHover={{ y: -1 }}
+                  disabled={busy || !message}
+                  onClick={run}
+                  className="group flex h-11 items-center gap-2 rounded-xl border-[1.5px] border-ink bg-tomato px-4 text-sm font-semibold shadow-[2px_2px_0_0_#161514] transition-[opacity,box-shadow] hover:shadow-[3px_3px_0_0_#161514] disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4 transition-transform duration-300 group-hover:rotate-12 group-hover:scale-110" />}
+                  Plan with Gemini
+                </motion.button>
+              </>
+            ) : (
+              <>
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  disabled={busy || !message}
+                  onClick={run}
+                  title="Run here without an AI assistant"
+                  aria-label="Run here"
+                  className="grid size-11 place-items-center rounded-xl border-[1.5px] border-ink/25 text-ink/60 transition-colors hover:border-ink hover:text-ink disabled:opacity-30"
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  whileHover={{ y: -1 }}
+                  disabled={!message}
+                  onClick={copy}
+                  className="flex h-11 items-center gap-2 rounded-xl border-[1.5px] border-ink bg-tomato px-4 text-sm font-semibold shadow-[2px_2px_0_0_#161514] transition-opacity disabled:opacity-40"
+                >
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span key={copied ? "y" : "n"} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                    </motion.span>
+                  </AnimatePresence>
+                  Copy for AI
+                </motion.button>
+              </>
+            )}
           </div>
         </div>
       </div>
       <p className="mt-3 text-center text-xs text-muted-foreground">
-        Paste it into your AI assistant (Claude, ChatGPT, Cursor…) and it plans the event through Movents.{" "}
+        {gemini
+          ? "Gemini agents plan it here: proposal, budget, speakers, risks and promotion, checked against your SOP. Nothing goes out until a human approves. Or copy it into your own AI assistant."
+          : "Paste it into your AI assistant (Claude, ChatGPT, Cursor…) and it plans the event through Movents."}{" "}
         <Link href="/settings" className="font-medium text-tomato-ink underline-offset-2 hover:underline">
           Connect your assistant
         </Link>

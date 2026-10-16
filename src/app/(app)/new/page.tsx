@@ -5,6 +5,7 @@ import { today } from "@/lib/appurl";
 import { visibleSql } from "@/lib/members";
 import type { AgentRun, Role } from "@/lib/types";
 import { PromptBox } from "@/components/app/prompt-box";
+import { geminiEnabled } from "@/lib/ai/gemini";
 import { Eyebrow } from "@/components/ep/kit";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +34,7 @@ export default async function NewEvent() {
           <Eyebrow>Admit one prompt</Eyebrow>
           <h1 className="mt-2 font-display text-4xl font-bold tracking-tight md:text-5xl">What are we putting on?</h1>
         </div>
-        <PromptBox today={today()} people={people} me={user.id} />
+        <PromptBox today={today()} people={people} me={user.id} gemini={geminiEnabled()} />
       </div>
 
       <aside className="lg:border-l-[1.5px] lg:border-ink lg:pl-6">

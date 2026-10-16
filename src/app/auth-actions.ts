@@ -6,6 +6,7 @@ import { consumeLoginLink, deleteAccount, endAllSessions, normaliseEmail, sendLo
 import { clientIp, rateLimit, RateLimitError } from "@/lib/ratelimit";
 import { endSession, startSession, currentUser } from "@/lib/session";
 import { audit } from "@/lib/audit";
+import { createDemoSandbox } from "@/lib/demo";
 
 export type LoginState = { ok: boolean; sentTo?: string; error?: string };
 
@@ -63,4 +64,12 @@ export async function deleteMyAccount(confirmEmail: string): Promise<{ ok: false
   }
   await endSession();
   redirect("/login");
+}
+
+/** "Try the demo": a fresh private sandbox society, signed in as its President. */
+export async function startDemo() {
+  await rateLimit(`demo:ip:${await clientIp()}`, 10, 3600);
+  const userId = await createDemoSandbox();
+  await startSession(userId);
+  redirect("/new");
 }

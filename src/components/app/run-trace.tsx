@@ -112,13 +112,15 @@ export function RunTrace({ initial }: { initial: AgentRun & { by: string | null 
   const blocked = run.steps.filter((s) => s.status === "blocked").length;
   const adapted = run.steps.filter((s) => s.adapt).length;
   const checks = run.steps.flatMap((s) => s.validation ?? []);
-  const expected = run.kind === "plan" ? 24 : 7;
+  const expected = run.source === "gemini" ? 40 : run.kind === "plan" ? 24 : 7;
+  const result = (run.summary ?? {}) as { summary?: string; time_saved_hours?: number; waiting_for_approval?: number; needs_human?: string[] };
+  const agents = new Set(run.steps.map((s) => s.tool.match(/^Gemini · ([a-z ]+?)(?: →|$)/)?.[1]).filter(Boolean)).size;
   const pct = run.status === "running" ? Math.min(95, (done / expected) * 100) : 100;
 
   return (
     <div>
       <div className="mb-8">
-        <Eyebrow>{run.source !== "builtin" ? "Agent run · AI assistant via MCP" : "Agent run · built-in executor"} · started by {run.by ?? ""}</Eyebrow>
+        <Eyebrow>{run.source === "gemini" ? "Agent run · Gemini multi-agent" : run.source !== "builtin" ? "Agent run · AI assistant via MCP" : "Agent run · built-in executor"} · started by {run.by ?? ""}</Eyebrow>
         <h1 className="mt-3 font-display text-3xl font-bold leading-tight tracking-tight md:text-[40px]">“{run.prompt}”</h1>
         <div className="mt-5 flex items-center gap-3">
           <div className="relative h-2.5 flex-1 overflow-hidden rounded-full border-[1.5px] border-ink bg-card">
@@ -143,6 +145,37 @@ export function RunTrace({ initial }: { initial: AgentRun & { by: string | null 
         </section>
 
         <aside className="space-y-8">
+          <AnimatePresence>
+            {run.status === "done" && result.summary && (
+              <motion.div initial={{ opacity: 0, y: 10, rotate: 0 }} animate={{ opacity: 1, y: 0, rotate: -0.8 }} transition={{ type: "spring", stiffness: 260, damping: 22 }} className="group overflow-hidden rounded-2xl border-[1.5px] border-ink bg-card shadow-pop transition-transform hover:rotate-0">
+                <div className="mono-label flex items-center justify-between bg-ink px-4 py-2.5 font-bold text-white">
+                  <span>Gemini&apos;s note</span>
+                  {agents > 0 && <span className="text-[10px] font-normal text-white/70">{agents} agents</span>}
+                </div>
+                <div className="p-4">
+                  <p className="text-sm leading-relaxed text-ink/85">{result.summary}</p>
+                  {typeof result.time_saved_hours === "number" && (
+                    <div className="mt-4 flex items-end gap-2 border-t border-dashed border-ink/30 pt-3">
+                      <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.25, type: "spring", stiffness: 400, damping: 16 }} className="font-display text-4xl font-bold tabular leading-none">
+                        ~{result.time_saved_hours}h
+                      </motion.span>
+                      <span className="pb-0.5 text-xs text-muted-foreground">of committee work done (estimate)</span>
+                    </div>
+                  )}
+                  {result.needs_human?.length ? (
+                    <ul className="mt-3 space-y-1">
+                      {result.needs_human.map((n) => (
+                        <li key={n} className="rounded-md bg-peach px-2 py-1 text-[12.5px] text-tomato-ink">
+                          Your call: {n}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="grid grid-cols-3 gap-3">
             {[
               { label: "Steps", value: done },

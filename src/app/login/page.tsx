@@ -5,6 +5,8 @@ import { currentUser } from "@/lib/session";
 import { googleEnabled } from "@/lib/auth/google";
 import { safeNext } from "@/lib/auth/tokens";
 import { LoginForm } from "./login-form";
+import { demoEnabled } from "@/lib/demo";
+import { startDemo } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in" };
@@ -26,6 +28,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="mt-1 text-sm text-muted-foreground">Plan your society&apos;s events with your team. New here? Signing in creates your account.</p>
         {error && ERRORS[error] && (
           <p role="alert" className="mt-5 rounded-xl border border-[var(--red-6)] bg-[var(--red-2)] p-3 text-sm text-[var(--red-11)]">{ERRORS[error]}</p>
+        )}
+        {demoEnabled() && (
+          <form action={startDemo} className="mt-6 rounded-2xl border-[1.5px] border-ink bg-sun-soft p-4">
+            <p className="mono-label text-[10px] font-bold">Demo for judges and visitors</p>
+            <p className="mt-1 text-sm text-ink/75">Opens a private sandbox society with sample teammates, signed in as its President. No email is ever sent from the demo.</p>
+            <button type="submit" className="mt-3 h-11 w-full rounded-xl border-[1.5px] border-ink bg-tomato text-sm font-semibold shadow-[2px_2px_0_0_#161514] transition-transform hover:-translate-y-px active:translate-y-0">
+              Try the live demo
+            </button>
+          </form>
         )}
         <LoginForm next={target} google={googleEnabled()} />
         <p className="mt-8 text-xs text-muted-foreground">

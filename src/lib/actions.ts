@@ -8,6 +8,7 @@ import { emailShell, sendEmail } from "./integrations/email";
 import { buildIcs, calendarMode, createGoogleEvent } from "./integrations/gcal";
 import { lumaCreateEvent, meetupCreateEvent } from "./integrations/ticketing";
 import { createCheckout, paymentsMode } from "./integrations/payments";
+import { agentContext } from "./agent/context";
 import type { ActionType, ApprovalRequest, EventRow, Speaker, Sponsor, Task, University, User, Vendor, Venue } from "./types";
 
 export type GateResult =
@@ -30,7 +31,12 @@ export async function gate(
   opts: { eventId?: string | null; runId?: string | null; amount?: number } = {},
 ): Promise<GateResult> {
   const threshold = await budgetThreshold(opts.eventId ?? null);
-  const d = decide(user, action, { amount: opts.amount, threshold });
+  let d = decide(user, action, { amount: opts.amount, threshold });
+  // The in-app AI agent never acts outside Movents alone: even a President's
+  // run queues outbound actions for a human. The internal calendar is exempt.
+  if (d.allowed && action !== "calendar.push" && agentContext()?.requireApproval) {
+    d = { allowed: false, approver_role: "president", approver_department: null, reason: "Drafted by the AI agent, a human must approve before it goes out" };
+  }
   if (d.allowed) {
     try {
       const result = await execute(action, payload, user, null);

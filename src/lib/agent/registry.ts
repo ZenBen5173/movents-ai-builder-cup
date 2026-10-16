@@ -16,6 +16,7 @@ import { offerLabel, outreachSponsors, recordSponsor, saveSponsors, type Decisio
 import { audit } from "../audit";
 import { isFinal } from "../rbac";
 import { validateArgs } from "./validate";
+import { agentContext } from "./context";
 import type { Sponsor } from "../types";
 
 type Args = Record<string, unknown>;
@@ -34,7 +35,7 @@ const ev = { event_id: str("Event id (evt_...) returned by create_event") };
 const runId = { run_id: str("Optional agent run id from start_run, when given, this call is recorded as a step in the live trace") };
 
 /** Links to every generated file. Files carry a 7-day signed token so the assistant (or anyone the user shares them with) can open them. */
-function outputs(eventId: string) {
+export function outputs(eventId: string) {
   const base = appUrl();
   const f = (file: string) => outputsUrl(eventId, file, 7);
   return {
@@ -57,10 +58,12 @@ function outputs(eventId: string) {
 /** Wrap a tool so that, given run_id, the call shows up in the run's live trace. */
 async function traced(user: User, args: Args, name: string, tool: string, fn: () => Promise<unknown>) {
   const rid = args.run_id ? String(args.run_id) : null;
-  const run = rid ? await Run.load(rid, user) : null;
+  // The in-app agents share one live Run; outside assistants load it per call.
+  const ctx = agentContext();
+  const run = rid ? (ctx?.run.id === rid ? ctx.run : await Run.load(rid, user)) : null;
   if (!run) return fn();
   if (args.event_id && !run.eventId) await run.setEvent(String(args.event_id));
-  return run.step(name, `assistant → ${tool}`, args, async () => {
+  return run.step(name, `${ctx?.run.id === rid ? ctx.label : "assistant"} → ${tool}`, args, async () => {
     const out = await fn();
     return { output: out, ...describe(out) };
   }).then((r) => r.output);
@@ -76,8 +79,11 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
       const v = toChecks(out as Check[]);
       return { status: v.every((x) => x.passed) ? "ok" : "warn", validation: v, summary: `${v.filter((x) => x.passed).length}/${v.length} checks passed` };
     }
+    if (!out.length) return { status: "ok", summary: "Nothing to do yet" };
     const blocked = out.filter((x) => (x as { status?: string }).status === "blocked").length;
-    return { status: blocked ? "blocked" : "ok", summary: blocked ? `${blocked} of ${out.length} blocked → approval queue` : `${out.length} done` };
+    const failed = out.filter((x) => (x as { status?: string }).status === "failed").length;
+    const parts = [blocked && `${blocked} of ${out.length} blocked → approval queue`, failed && `${failed} could not be drafted (${String((out.find((x) => (x as { status?: string }).status === "failed") as { detail?: string }).detail ?? "failed")})`].filter(Boolean);
+    return { status: blocked ? "blocked" : failed ? "warn" : "ok", summary: parts.length ? parts.join("; ") : `${out.length} done` };
   }
   if (out && typeof out === "object") {
     const o = out as Record<string, unknown>;
@@ -93,10 +99,15 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
     if (o.status === "failed") return { status: "fail", summary: String(o.error ?? "failed") };
     if (o.status === "executed") return { status: "ok", summary: String(o.reason ?? "executed") };
     if (typeof o.chosen === "string") return { status: "ok", summary: o.chosen };
+    if (Array.isArray(o.speakers) && o.suppliers && typeof o.suppliers === "object") return { status: "ok", summary: `${(o.speakers as string[]).length} speakers; suppliers: ${Object.entries(o.suppliers as Record<string, string[]>).map(([k, v]) => `${k} ${v.length}`).join(", ")}` };
     if (Array.isArray(o.speakers)) return { status: o.mode === "live" ? "ok" : "warn", summary: `${(o.speakers as { name: string }[]).map((s) => s.name).join(", ")} (${String(o.mode)})` };
-    if (o.university) return { status: "ok", summary: `${String(o.university)} SOP v${String(o.sopVersion)}` };
     if (typeof o.tasks === "number") return { status: "ok", summary: `${o.tasks} tasks across 5 phases` };
+    if (o.university) return { status: "ok", summary: `${String(o.university)} SOP v${String(o.sopVersion)}` };
+    if (Array.isArray(o.creatives)) return { status: "ok", summary: `${o.creatives.length} creatives: ${(o.creatives as { kind: string }[]).map((c) => c.kind).join(", ")}` };
     if (typeof o.count === "number") return { status: "ok", summary: `${o.count} risks` };
+    if (Array.isArray(o.written)) return { status: "ok", summary: `Wrote ${(o.written as string[]).join(", ")}` };
+    if (typeof o.added === "number" && Array.isArray(o.risks)) return { status: "ok", summary: `${o.added} event-specific risk(s) added: ${(o.risks as { category: string; score: number }[]).map((r) => `${r.category} (score ${r.score})`).join(", ")}` };
+    if (typeof o.saved === "number") return { status: o.saved ? "ok" : "warn", summary: `${o.saved} saved` };
     if (typeof o.runsheetBlocks === "number") return { status: "ok", summary: `${o.runsheetBlocks} run-sheet blocks, ${String(o.promoItems)} promo tasks, ${String(o.reminders)} reminders` };
     return { status: "ok", summary: JSON.stringify(o).slice(0, 160) };
   }
@@ -410,6 +421,18 @@ const ALL_TOOLS: Tool[] = [
   { name: "generate_risks", description: "Generate the risk register with mitigations and a weather/contingency plan (Open-Meteo data).", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Risk register", "generate_risks", () => T.generateRisks(String(a.event_id))) },
   { name: "generate_ops_pack", description: "Generate the 15-minute run sheet, promotion checklist, reminder cadence and volunteer roster.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Ops pack", "generate_ops_pack", () => T.generateOpsPack(String(a.event_id))) },
   { name: "validate_proposal", description: "Check that the generated proposal contains every section the university SOP requires.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Validate proposal", "validate_proposal", () => T.checkProposal(String(a.event_id))) },
+  {
+    name: "write_proposal_sections",
+    description: "Write the event-specific wording for the proposal: overview paragraph, objectives (3 to 5 bullets), learning outcomes and target audience. Replaces the generic text in the SOP proposal. Only the fields you pass change.",
+    inputSchema: { type: "object", properties: { ...ev, overview: { type: "string", description: "2 to 4 sentences: what, who, why it matters to students", maxLength: 1500 }, objectives: { type: "array", items: { type: "string" }, description: "3 to 5 measurable objectives" }, outcomes: { type: "string", description: "What participants can do afterwards", maxLength: 800 }, audience: { type: "string", description: "Who it is for, expected attendance, how they register", maxLength: 800 }, ...runId }, required: ["event_id"] },
+    run: (a, u) => traced(u, a, "Write proposal sections", "write_proposal_sections", () => T.writeProposalText(String(a.event_id), { overview: a.overview as string | undefined, objectives: a.objectives as string[] | undefined, outcomes: a.outcomes as string | undefined, audience: a.audience as string | undefined })),
+  },
+  {
+    name: "add_risks",
+    description: "Add risks specific to this event that the generated register missed (e.g. a speaker flying in, a hybrid stream, a food allergy profile). likelihood and impact are 1 to 5. Run generate_risks first; it replaces the register.",
+    inputSchema: { type: "object", properties: { ...ev, risks: { type: "array", items: { type: "object", properties: { category: str("e.g. Speaker, AV / Tech, Food, Crowd, Safety"), description: str("What could go wrong"), likelihood: { type: "number", description: "1 to 5" }, impact: { type: "number", description: "1 to 5" }, mitigation: str("What we do to prevent it"), contingency: str("What we do if it happens") }, required: ["category", "description", "likelihood", "impact", "mitigation"] } }, ...runId }, required: ["event_id", "risks"] },
+    run: (a, u) => traced(u, a, "Add event-specific risks", "add_risks", () => T.addRisks(String(a.event_id), (a.risks as T.RiskInput[]) ?? [])),
+  },
   { name: "get_outputs", description: "Links to every generated file for an event (proposal PDF/DOCX, budget XLSX/CSV, risk register, run sheet, timeline ICS, report).", inputSchema: { type: "object", properties: { ...ev }, required: ["event_id"] }, run: async (a) => outputs(String(a.event_id)) },
   { name: "get_event", description: "Summary of an event: status, venue, budget totals, speakers, approvals and flags.", inputSchema: { type: "object", properties: { ...ev }, required: ["event_id"] }, run: async (a) => { const b = await loadBundle(String(a.event_id)); if (!b) throw new Error("Event not found"); const approvals = await query("SELECT id, title, status, approver_role FROM approval_requests WHERE event_id = $1 ORDER BY created_at", [b.event.id]); return { event: b.event, venue: b.venue?.name, budget: budgetTotals(b.lines, b.university?.sop.budget_rules.contingency_pct ?? 10), speakers: b.speakers.map((s) => ({ name: s.name, status: s.status })), approvals, rsvps: b.rsvps.length }; } },
   { name: "send_speaker_outreach", description: "Send invitation emails to found speakers. Role-gated: committee members' emails are queued for Director approval.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Send speaker outreach", "send_speaker_outreach", () => T.outreachSpeakers(u, String(a.event_id), (a.run_id as string) ?? null)) },
