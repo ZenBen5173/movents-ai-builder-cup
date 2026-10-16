@@ -20,6 +20,8 @@ export type Part = {
   thoughtSignature?: string;
   functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
   functionResponse?: { id?: string; name: string; response: Record<string, unknown> };
+  /** A file sent with the prompt, e.g. a PDF template. */
+  inlineData?: { mimeType: string; data: string };
 };
 export type Content = { role: "user" | "model"; parts: Part[] };
 export type FunctionDecl = { name: string; description: string; parametersJsonSchema: Record<string, unknown> };

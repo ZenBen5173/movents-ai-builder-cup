@@ -1,7 +1,8 @@
 import { query } from "@/lib/db";
 import { outputsUrl } from "@/lib/appurl";
 import { FileBrowser, type FolderNode } from "@/components/app/file-browser";
-import { canViewEvent } from "@/lib/guard";
+import { canViewEvent, pageUser } from "@/lib/guard";
+import { TemplatesPanel } from "@/components/app/templates-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,14 @@ const KIND_LABEL: Record<string, string> = { poster: "Poster", ig_post: "Instagr
 export default async function EventFiles({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!(await canViewEvent(id))) return null;
+  const user = await pageUser();
+  const [templates, filled] = await Promise.all([
+    query<{ id: string; name: string; kind: string }>("SELECT id, name, kind FROM society_templates WHERE society_id = $1 ORDER BY created_at DESC", [user.society_id]),
+    query<{ id: string; template: string; gaps: string[]; created_at: string }>(
+      "SELECT f.id, t.name AS template, f.gaps, f.created_at FROM filled_templates f JOIN society_templates t ON t.id = f.template_id WHERE f.event_id = $1 ORDER BY f.created_at DESC LIMIT 20",
+      [id],
+    ),
+  ]);
   const [report, fb, speakers, vendors, creatives] = await Promise.all([
     query("SELECT 1 FROM agent_runs WHERE event_id = $1 AND kind = 'report' LIMIT 1", [id]),
     query("SELECT 1 FROM feedback WHERE event_id = $1 LIMIT 1", [id]),
@@ -95,5 +104,10 @@ export default async function EventFiles({ params }: { params: Promise<{ id: str
         : [],
     },
   ];
-  return <FileBrowser tree={tree} />;
+  return (
+    <>
+      <TemplatesPanel eventId={id} templates={templates} filled={filled.map((f) => ({ ...f, created_at: new Date(f.created_at).toISOString() }))} />
+      <FileBrowser tree={tree} />
+    </>
+  );
 }

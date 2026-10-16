@@ -3,6 +3,7 @@ import m002 from "./002_auth_tenancy";
 import m004 from "./004_oauth";
 import m005 from "./005_university_ownership";
 import m006 from "./006_media_storage";
+import m007 from "./007_templates";
 import { seedReference } from "../seed";
 
 type Q = (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
@@ -24,4 +25,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 4, name: "oauth", sql: m004 },
   { id: 5, name: "university_ownership", sql: m005 },
   { id: 6, name: "media_storage", sql: m006 },
+  { id: 7, name: "templates", sql: m007 },
 ];

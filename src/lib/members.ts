@@ -33,6 +33,7 @@ export async function assertMember(user: Pick<User, "id" | "role" | "society_id"
 const EVENT_TABLES = new Set([
   "tasks", "speakers", "vendors", "budget_lines", "risks", "rsvps", "feedback", "promo_items", "reminders", "runsheet_items",
   "volunteers", "payments", "creatives", "sponsors", "meetings", "approval_requests", "emails", "calendar_events", "agent_runs",
+  "filled_templates",
 ]);
 
 /** Look up the event a row belongs to, then check the user is on it. Missing rows fail closed. */

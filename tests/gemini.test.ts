@@ -225,3 +225,15 @@ test("demo sandboxes are separate societies", async () => {
   const team = await query("SELECT 1 FROM memberships WHERE society_id = $1", [a.society_id]);
   assert.equal(team.length, 8);
 });
+
+test("Word templates are read without extra packages", async () => {
+  const { renderDocx } = await import("../src/lib/docs/render");
+  const { docxText } = await import("../src/lib/docs/extract");
+  const buf = await renderDocx({ title: "Pre-Event Proposal", sections: [{ title: "Section A: Event Details", blocks: [{ type: "p", text: "Event Title:" }, { type: "table", head: ["Time", "Activity"], rows: [["14:00", "Opening"]] }] }] });
+  const text = docxText(buf);
+  assert.match(text, /Pre-Event Proposal/);
+  assert.match(text, /Section A: Event Details/);
+  assert.match(text, /Event Title:/);
+  assert.match(text, /Opening/);
+  assert.throws(() => docxText(Buffer.from("not a zip")), /Word/);
+});

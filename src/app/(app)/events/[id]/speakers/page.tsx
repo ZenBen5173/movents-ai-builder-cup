@@ -1,4 +1,4 @@
-import { Mail, Phone, Search, ThumbsDown, UserCheck } from "lucide-react";
+import { ArrowUpRight, Mail, Phone, Search, ThumbsDown, UserCheck } from "lucide-react";
 import { loadBundle } from "@/lib/docs/builders";
 import { Card } from "@/components/app/ui";
 import { ActionButton } from "@/components/app/action-button";
@@ -63,6 +63,19 @@ export default async function SpeakersPage({ params }: { params: Promise<{ id: s
               {s.status === "confirmed" && <Stamp tone="green" className="absolute -right-2 -top-1 rotate-12 text-[11px]">Booked</Stamp>}
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <DocModal href={`/api/outputs/${id}/speaker-${s.id}.pdf`} title={s.name} className="inline-flex h-7 items-center rounded-lg border border-ink/20 px-2 text-xs transition-colors hover:border-ink">Profile</DocModal>
+                {s.source_url && s.source !== "sample" && (
+                  <a
+                    href={s.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Where Gemini found ${s.name}: ${s.source_url}`}
+                    className="group/src inline-flex h-7 items-center gap-1 rounded-lg border border-ink/20 px-2 text-xs transition-colors hover:border-ink"
+                  >
+                    {/linkedin\.com/i.test(s.source_url) ? "LinkedIn" : "Source"}
+                    <ArrowUpRight className="size-3 transition-transform group-hover/src:-translate-y-px group-hover/src:translate-x-px" />
+                  </a>
+                )}
+                {s.source === "sample" && <span title="A placeholder until real speakers are found" className="inline-flex h-7 items-center rounded-lg bg-sun-soft px-2 text-xs text-ink/70">Sample</span>}
                 {s.status === "found" && <ActionButton action={speakerAction.bind(null, s.id, "outreach")} size="xs" variant="primary" icon={<Mail className="size-3.5" />}>Invite</ActionButton>}
                 {["contacted", "followed_up"].includes(s.status) && <ActionButton action={speakerAction.bind(null, s.id, "replied")} size="xs">Replied</ActionButton>}
                 {["contacted", "followed_up", "replied"].includes(s.status) && <ActionButton action={speakerAction.bind(null, s.id, "confirm")} size="xs" variant="success" icon={<UserCheck className="size-3.5" />}>Confirm</ActionButton>}
