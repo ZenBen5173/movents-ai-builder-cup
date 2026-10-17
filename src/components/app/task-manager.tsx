@@ -337,7 +337,7 @@ function Timeline({ tasks, critical, eventDate, onOpen }: { tasks: TaskItem[]; c
                   const y2 = ti * ROW + ROW / 2;
                   const hot = critical.has(t.id) && critical.has(d);
                   const mid = Math.max(x1 + 6, x2 - 8);
-                  return <path key={`${d}-${t.id}`} d={`M${x1} ${y1} H${mid} V${y2} H${x2 - 1}`} fill="none" stroke={hot ? "#ff5a36" : "#161514"} strokeOpacity={hot ? 0.9 : 0.25} strokeWidth={hot ? 1.5 : 1} markerEnd={`url(#${hot ? "arrow-hot" : "arrow"})`} />;
+                  return <path key={`${d}-${t.id}`} data-live-after={`${d} ${t.id}`} d={`M${x1} ${y1} H${mid} V${y2} H${x2 - 1}`} fill="none" stroke={hot ? "#ff5a36" : "#161514"} strokeOpacity={hot ? 0.9 : 0.25} strokeWidth={hot ? 1.5 : 1} markerEnd={`url(#${hot ? "arrow-hot" : "arrow"})`} />;
                 }),
               )}
             </svg>
@@ -350,6 +350,7 @@ function Timeline({ tasks, critical, eventDate, onOpen }: { tasks: TaskItem[]; c
                 <motion.button
                   key={t.id}
                   data-live-item
+                  data-live-id={t.id}
                   onClick={() => onOpen(t)}
                   onMouseMove={(e) => {
                     const r = scroller.current!.getBoundingClientRect();

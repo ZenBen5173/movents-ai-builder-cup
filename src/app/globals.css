@@ -282,3 +282,12 @@
 .mv-write {
   animation: mv-write 0.9s ease-out both;
 }
+
+/* A timeline arrow, drawn once both of its tasks are written. */
+@keyframes mv-draw {
+  from { stroke-dasharray: 600; stroke-dashoffset: 600; }
+  to { stroke-dasharray: 600; stroke-dashoffset: 0; }
+}
+.mv-draw {
+  animation: mv-draw 0.6s ease-out both;
+}

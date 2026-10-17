@@ -8,6 +8,7 @@ import { RecordEditor } from "@/components/app/record-editor";
 import { editVendor } from "@/app/actions";
 import { cn } from "@/lib/utils";
 import { canViewEvent } from "@/lib/guard";
+import { supplierPhotos } from "@/lib/vendor-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function SuppliersPage({ params }: { params: Promise<{ id: 
   const b = (await loadBundle(id))!;
   const payments = await query<{ vendor_id: string; checkout_url: string; status: string }>("SELECT * FROM payments WHERE event_id = $1 ORDER BY created_at DESC", [id]);
   const chosen = b.vendors.filter((v) => v.selected);
+  const photos = supplierPhotos(b.vendors);
   return (
     <Card title="Suppliers" surface actions={<a href={`/events/${id}/budget`} className="text-xs font-medium text-tomato-ink hover:underline">Change on Budget</a>}>
       <div className="-mx-4 -my-4 overflow-x-auto">
@@ -55,9 +57,9 @@ export default async function SuppliersPage({ params }: { params: Promise<{ id: 
                 <tr key={v.id} className="group border-b border-border align-middle transition-colors last:border-b-0 hover:bg-sand/30">
                   <td className="px-4 py-3">
                     <span className="flex items-center gap-2.5">
-                      {v.photo_url ? (
+                      {photos.get(v.id) ? (
                         <span className="relative size-11 shrink-0 overflow-hidden rounded-lg border-[1.5px] border-ink bg-sand transition-transform group-hover:-rotate-3">
-                          <img src={v.photo_url} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                          <img src={photos.get(v.id)} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-110" />
                           <span className="absolute bottom-0.5 right-0.5 grid size-4 place-items-center rounded bg-card/90"><I className="size-2.5" /></span>
                         </span>
                       ) : (

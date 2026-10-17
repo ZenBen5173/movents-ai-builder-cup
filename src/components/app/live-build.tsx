@@ -226,6 +226,17 @@ async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: nu
   const nodes: { node: Text; text: string }[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push({ node: n as Text, text: n.nodeValue ?? "" });
   nodes.forEach((n) => (n.node.nodeValue = ""));
+  // Links between items (timeline arrows) wait until both ends are written.
+  const links = [...el.querySelectorAll<SVGElement>("[data-live-after]")];
+  links.forEach((x) => x.classList.add("mv-pending"));
+  const written = new Set<string>();
+  const drawLinks = () => {
+    for (const x of links)
+      if (x.classList.contains("mv-pending") && (x.dataset.liveAfter ?? "").split(" ").every((k) => written.has(k))) {
+        x.classList.remove("mv-pending");
+        x.classList.add("mv-draw");
+      }
+  };
   quiet();
   el.classList.remove("mv-pending");
   el.classList.add("mv-write");
@@ -233,11 +244,17 @@ async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: nu
   try {
     for (const { node, text } of nodes) {
       if (stop()) break;
+      if (!node.isConnected) continue; // replaced by fresh data meanwhile: that is queued on its own
       for (let p = node.parentElement; p && p !== el.parentElement; p = p.parentElement) {
         if (p.classList.contains("mv-pending")) {
           p.classList.remove("mv-pending");
           p.classList.add("mv-write");
         }
+      }
+      const owner = node.parentElement?.closest<HTMLElement>("[data-live-id]");
+      if (owner?.dataset.liveId && !written.has(owner.dataset.liveId)) {
+        written.add(owner.dataset.liveId);
+        drawLinks();
       }
       const parts = tokens(text);
       let out = "";
@@ -255,8 +272,12 @@ async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: nu
     for (const { node, text } of nodes) if (text.startsWith(node.nodeValue ?? "")) node.nodeValue = text;
     quiet();
     subs.forEach((x) => x.classList.remove("mv-pending"));
+    links.forEach((x) => x.classList.remove("mv-pending"));
     el.classList.remove("mv-pending");
-    setTimeout(() => [el, ...subs].forEach((x) => x.classList.remove("mv-write")), 900);
+    setTimeout(() => {
+      [el, ...subs].forEach((x) => x.classList.remove("mv-write"));
+      links.forEach((x) => x.classList.remove("mv-draw"));
+    }, 900);
   }
 }
 
@@ -271,7 +292,6 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const posRef = useRef(pos);
   posRef.current = pos;
   const [burst, setBurst] = useState<{ x: number; y: number; k: number } | null>(null);
-  const lastStep = useRef<string | null>(null);
   // Tabs to visit, in the order Gemini worked on them; the page being written is finished first.
   const targets = useRef<string[]>([]);
 
@@ -299,22 +319,26 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     setEngaged(true);
   }, [live]);
 
-  // A new step landed: queue its tab, and fetch the fresh data so it can be written in.
+  // New steps landed: queue their tabs, and fetch the fresh data so it can be written in.
+  // Several steps can land between two polls (agents run in parallel), so every unseen
+  // step counts, not just the latest. Opened mid-run, that includes the steps already done.
+  const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (!current || current.id === lastStep.current) return;
-    const first = lastStep.current === null;
-    lastStep.current = current.id;
-    if (first && !live) return;
+    if (!current) return;
+    const first = seen.current === null;
+    const known = (seen.current ??= new Set());
+    const fresh = steps.filter((st) => !known.has(st.id));
+    fresh.forEach((st) => known.add(st.id));
+    if (!fresh.length || (first && !live)) return;
     // Each tab once per build: parallel agents would otherwise bounce the view between tabs.
-    // Opened mid-run: also tour the tabs Gemini already finished, in the order it did them.
-    for (const st of first ? steps : [current]) {
+    for (const st of fresh) {
       const seg = stepInfo(st.tool, st.name).seg;
       if (!visited.current.has(seg) && !targets.current.includes(seg)) targets.current.push(seg);
     }
     const t = setTimeout(() => router.refresh(), 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id]);
+  }, [current?.id, steps.length]);
 
   // The writer: anything new on the page (a tab Gemini moved to, rows that just
   // landed, a header value that changed) waits hidden, then is written in.
@@ -333,7 +357,8 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     let arrived = Date.now();
     let pending: string | null = null;
     let pushedAt = 0;
-    const busy = (el: Element) => (writing?.contains(el) ?? false) || queue.some((q) => q.contains(el));
+    // Rows that land inside the item being written still get written, after it (else they would just appear).
+    const busy = (el: Element) => el === writing || queue.some((q) => q.contains(el));
     const take = (el: Element | null) => {
       // Size is checked when it is written: a board or list that animates in has none yet.
       if (!(el instanceof HTMLElement) || busy(el) || host.current?.contains(el) || el.closest("[aria-busy='true']")) return;

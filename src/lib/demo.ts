@@ -28,6 +28,7 @@ export async function createDemoSandbox() {
   if (!demoEnabled()) throw new Error("The demo is not enabled on this server.");
   const uni = await one<{ id: string }>("SELECT id FROM universities WHERE id = 'uni_sunway'") ?? (await one<{ id: string }>("SELECT id FROM universities ORDER BY name LIMIT 1"));
   if (!uni) throw new Error("No university data yet. Run the migrations first.");
+  await sampleVenueBookings(uni.id).catch((err) => console.error("[demo] venue bookings", err));
   const tag = id("x").slice(2, 10).toLowerCase();
   const sid = id("soc");
   const userId = id("usr");
@@ -161,6 +162,7 @@ export async function demoExtras(user: import("./types").User, eventId: string, 
   // Extras for a fuller demo; a hiccup here never stops the event being set up.
   await sampleSponsorProgress(eventId).catch((err) => console.error("[demo] sponsor progress", err));
   await sampleReplies(user, eventId).catch((err) => console.error("[demo] replies", err));
+  await sampleFiles(user, eventId).catch((err) => console.error("[demo] files", err));
   if (opts.trail !== false) await sampleInboxAndMeetings(user, eventId);
 }
 
@@ -258,6 +260,76 @@ export async function sampleReplies(user: import("./types").User, eventId: strin
       "INSERT INTO emails (id, event_id, kind, to_addr, intended_to, subject, body, status, provider, related_id, sent_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 'received', 'gmail', $8, $9, $9)",
       [id("eml"), eventId, r.kind, me, r.from, r.subject, r.html, r.related, new Date(Date.now() - r.ago * 86_400_000)],
     );
+  }
+}
+
+/** A few documents the committee already shared, so Files is not empty: a contact list, meeting notes, a signed form. */
+export async function sampleFiles(user: import("./types").User, eventId: string) {
+  if (await one("SELECT 1 FROM event_files WHERE event_id = $1 LIMIT 1", [eventId])) return;
+  const ev = await one<{ title: string; date: string; venue: string | null }>("SELECT e.title, e.date, v.name AS venue FROM events e LEFT JOIN venues v ON v.id = e.venue_id WHERE e.id = $1", [eventId]);
+  if (!ev) return;
+  const members = await query<{ name: string; email: string; role: string }>(
+    "SELECT u.name, u.email, COALESCE(ms.role, 'committee') AS role FROM event_members m JOIN users u ON u.id = m.user_id LEFT JOIN memberships ms ON ms.user_id = u.id AND ms.society_id = (SELECT society_id FROM events WHERE id = $1) WHERE m.event_id = $1 ORDER BY m.added_at",
+    [eventId],
+  );
+  const { fmtDate } = await import("./appurl");
+  const { renderPdf } = await import("./docs/render");
+  const csv = ["Name,Role,Email,Phone", ...members.map((m, i) => `${m.name},${m.role.replace(/_/g, " ")},${m.email},012-${String(3104410 + i * 7319).slice(0, 7)}`)].join("\n");
+  const notes = [
+    `${ev.title}: kick-off notes`,
+    "",
+    "Decisions",
+    `- Event on ${fmtDate(ev.date)}${ev.venue ? ` at ${ev.venue}` : ""}.`,
+    "- Gemini drafts outreach; we check and send each email ourselves.",
+    "- Budget goes to the President for sign-off before any deposit.",
+    "",
+    "Action items",
+    "- Confirm speakers by next Friday.",
+    "- Collect two written supplier quotes for food.",
+    "- Book the venue and upload the confirmation here.",
+  ].join("\n");
+  const form = await renderPdf({
+    title: "Venue booking form",
+    subtitle: ev.title,
+    meta: [["Date", fmtDate(ev.date)], ["Venue", ev.venue ?? "To be confirmed"], ["Requested by", user.name]],
+    sections: [
+      { title: "Booking", blocks: [{ type: "kv", rows: [["Purpose", ev.title], ["Setup", "Theatre seating, projector, two wireless mics"], ["Status", "Submitted to Facilities"]] }] },
+      { title: "Signatures", blocks: [{ type: "table", head: ["Role", "Name", "Signed"], rows: [["Event lead", user.name, "Yes"], ["Faculty advisor", "", ""]] }] },
+    ],
+  });
+  const files: [string, string, Buffer][] = [
+    ["Venue booking form.pdf", "application/pdf", form],
+    ["Committee contacts.csv", "text/csv", Buffer.from(csv)],
+    ["Kick-off notes.txt", "text/plain", Buffer.from(notes)],
+  ];
+  for (const [i, [name, mime, data]] of files.entries()) {
+    await query("INSERT INTO event_files (id, event_id, name, mime, size, data, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now() - ($8 || ' hours')::interval)", [
+      id("fil"), eventId, name, mime, data.length, data, user.id, String(30 - i * 9),
+    ]);
+  }
+}
+
+/**
+ * Bookings on every venue at the university for the next two months (lectures,
+ * exams, other societies), so each venue's availability calendar shows real
+ * busy and free time. Shared by every demo; tops a venue up only when it is quiet.
+ */
+export async function sampleVenueBookings(universityId: string) {
+  const venues = await query<{ id: string; name: string }>("SELECT id, name FROM venues WHERE university_id = $1", [universityId]);
+  const day = (n: number) => new Date(Date.now() + 8 * 3600_000 + n * 86_400_000).toISOString().slice(0, 10);
+  const SOC = ["Debate Club", "Robotics Society", "Music Club", "Entrepreneurship Society", "Photography Club", "Red Crescent"];
+  const CLASS = ["Lecture: Data Structures", "Lecture: Marketing 101", "Tutorial: Statistics", "Lab: Embedded Systems"];
+  for (const [v, venue] of venues.entries()) {
+    const have = await one<{ n: number }>("SELECT count(*)::int AS n FROM venue_bookings WHERE venue_id = $1 AND date >= $2", [venue.id, day(0)]);
+    if (Number(have?.n) >= 6) continue;
+    const rows: [string, string | null, string, string, string, string][] = [];
+    // A weekly class, two society events and an exam, spread over eight weeks.
+    for (let w = 0; w < 8; w++) rows.push([CLASS[v % CLASS.length], "Faculty timetable", "class", day(1 + ((v * 2) % 5) + w * 7), "09:00", "11:00"]);
+    for (let k = 0; k < 4; k++) rows.push([`${SOC[(v + k) % SOC.length]} event`, SOC[(v + k) % SOC.length], "society", day(3 + ((v * 3 + k * 11) % 50)), k % 2 ? "19:00" : "14:00", k % 2 ? "22:00" : "17:00"]);
+    rows.push([`Final exam: ${["Calculus", "Accounting", "Programming", "Biology"][v % 4]}`, "Examinations unit", "exam", day(40 + (v % 7)), "09:00", "12:00"]);
+    for (const [title, holder, kind, date, start, end] of rows) {
+      await query("INSERT INTO venue_bookings (id, venue_id, title, holder, kind, date, start_time, end_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id("vbk"), venue.id, title, holder, kind, date, start, end]);
+    }
   }
 }
 

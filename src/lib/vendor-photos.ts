@@ -12,3 +12,23 @@ export function vendorPhoto(category: string, index: number) {
   const list = PHOTOS[category] ?? PHOTOS.food;
   return list[index % list.length];
 }
+
+/**
+ * One picture per supplier: its own page image when that image shows only its
+ * product, else a photo of the category. Suppliers' sites often reuse one banner
+ * for everything they sell (a T-shirt on the card-holder page), so an image
+ * shared across categories is not used.
+ */
+export function supplierPhotos<T extends { id: string; category: string; photo_url?: string | null }>(vendors: T[]) {
+  const cats = new Map<string, Set<string>>();
+  for (const v of vendors) if (v.photo_url) cats.set(v.photo_url, (cats.get(v.photo_url) ?? new Set()).add(v.category));
+  const seen = new Map<string, number>();
+  return new Map(
+    vendors.map((v) => {
+      const i = seen.get(v.category) ?? 0;
+      seen.set(v.category, i + 1);
+      const own = v.photo_url && cats.get(v.photo_url)!.size === 1 ? v.photo_url : null;
+      return [v.id, own ?? vendorPhoto(v.category, i)];
+    }),
+  );
+}
