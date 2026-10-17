@@ -163,6 +163,7 @@ export async function demoExtras(user: import("./types").User, eventId: string, 
   await sampleSponsorProgress(eventId).catch((err) => console.error("[demo] sponsor progress", err));
   await sampleReplies(user, eventId).catch((err) => console.error("[demo] replies", err));
   await sampleFiles(user, eventId).catch((err) => console.error("[demo] files", err));
+  await sampleKickoffNotes(user, eventId).catch((err) => console.error("[demo] kick-off notes", err));
   if (opts.trail !== false) await sampleInboxAndMeetings(user, eventId);
 }
 
@@ -261,6 +262,47 @@ export async function sampleReplies(user: import("./types").User, eventId: strin
       [id("eml"), eventId, r.kind, me, r.from, r.subject, r.html, r.related, new Date(Date.now() - r.ago * 86_400_000)],
     );
   }
+}
+
+/**
+ * The Kick-off Gemini books is held two days ago, with minutes, decisions and
+ * action items (which become tasks), so Meetings shows a real record. Only a
+ * Kick-off with no minutes yet is touched.
+ */
+export async function sampleKickoffNotes(user: import("./types").User, eventId: string) {
+  const k = await one<{ id: string }>("SELECT id FROM meetings WHERE event_id = $1 AND title ILIKE 'Kick-off%' AND COALESCE(minutes, '') = '' ORDER BY starts_at LIMIT 1", [eventId]);
+  if (!k) return;
+  const M = await import("./meetings");
+  const { fmtDate } = await import("./appurl");
+  const ev = await one<{ title: string; date: string; pax: number; venue: string | null; cap: number }>(
+    "SELECT e.title, e.date, e.pax, v.name AS venue, e.budget_cap AS cap FROM events e LEFT JOIN venues v ON v.id = e.venue_id WHERE e.id = $1",
+    [eventId],
+  );
+  if (!ev) return;
+  const team = await query<{ user_id: string }>("SELECT user_id FROM event_members WHERE event_id = $1 ORDER BY added_at", [eventId]);
+  const owner = (i: number) => team[i % Math.max(1, team.length)]?.user_id ?? user.id;
+  const day = (n: number) => new Date(Date.now() + 8 * 3600_000 + n * 86_400_000).toISOString().slice(0, 10);
+  // Same time of day, two days ago.
+  await query("UPDATE meetings SET starts_at = starts_at - (GREATEST(0, CEIL(EXTRACT(EPOCH FROM starts_at - now()) / 86400)) + 2) * interval '1 day' WHERE id = $1", [k.id]);
+  await M.recordMinutes(user, k.id, {
+    minutes: `## Goals
+- ${ev.title} for about ${ev.pax} students on ${fmtDate(ev.date)}.
+## Budget
+- Plan inside RM${Number(ev.cap).toLocaleString("en-MY")}; ask sponsors to cover food.
+## Speakers
+- Gemini's shortlist is on the Speakers tab; invites go out this week.
+## Venue
+- ${ev.venue ? `${ev.venue} is pencilled in` : "Venue still to book"}; Facilities needs the approved proposal two weeks before.`,
+    decisions: [`Venue: ${ev.venue ?? "to be booked"}`, "Halal catering only", "Registration through the public event page", "Emails go out only after a committee member checks them"],
+    action_items: [
+      { text: "Send the venue booking request to Facilities", owner_id: owner(0), due_date: day(2) },
+      { text: "Confirm the caterer's written quote", owner_id: owner(1), due_date: day(5) },
+      { text: "Check and send the speaker invites in Inbox, Drafts", owner_id: owner(0), due_date: day(3) },
+    ],
+    attended: team.map((t) => t.user_id),
+    create_tasks: true,
+    mark_done: true,
+  });
 }
 
 /** A few documents the committee already shared, so Files is not empty: a contact list, meeting notes, a signed form. */
