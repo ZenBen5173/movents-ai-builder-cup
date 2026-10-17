@@ -63,7 +63,7 @@ export default async function EventLayout({ children, params }: { children: Reac
           </Link>
           </div>
         </div>
-        <dl className="mt-4 grid max-w-3xl grid-cols-[110px_1fr] gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[110px_1fr_110px_1fr]">
+        <dl data-live-write className="mt-4 grid max-w-3xl grid-cols-[110px_1fr] gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[110px_1fr_110px_1fr]">
           {props.map(([k, v]) => (
             <div key={k} className="contents">
               <dt className="mono-label pt-[3px] text-[10px] text-muted-foreground">{k}</dt>

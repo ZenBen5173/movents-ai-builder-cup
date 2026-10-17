@@ -270,15 +270,15 @@
 @media (prefers-reduced-motion: reduce) { .animate-sway, .animate-flag, .animate-bulb, .animate-beam { animation: none !important; } }
 
 
-/* Live build: items Gemini is about to write in wait hidden, then appear one by one with a brief highlight. */
+/* Live build: what Gemini is about to write waits hidden, then is written in with a soft highlight. */
 .mv-pending {
   opacity: 0 !important;
 }
-@keyframes mv-reveal {
-  0% { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 2px rgb(255 90 54 / 0.55); background-color: rgb(255 90 54 / 0.12); }
-  45% { opacity: 1; transform: none; box-shadow: 0 0 0 2px rgb(255 90 54 / 0.45); background-color: rgb(255 90 54 / 0.1); }
+@keyframes mv-write {
+  0% { opacity: 0; box-shadow: 0 0 0 2px rgb(255 90 54 / 0.5); background-color: rgb(255 90 54 / 0.08); }
+  20% { opacity: 1; }
   100% { box-shadow: 0 0 0 0 rgb(255 90 54 / 0); background-color: transparent; }
 }
-.mv-reveal {
-  animation: mv-reveal 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+.mv-write {
+  animation: mv-write 0.9s ease-out both;
 }

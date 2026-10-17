@@ -158,7 +158,107 @@ export async function seedDemoEvents(userId: string) {
 /** Sample registrations, and for the seeded sample events also a sent-email trail and meetings. */
 export async function demoExtras(user: import("./types").User, eventId: string, opts: { trail?: boolean } = {}) {
   await sampleRegistrations(eventId);
+  // Extras for a fuller demo; a hiccup here never stops the event being set up.
+  await sampleSponsorProgress(eventId).catch((err) => console.error("[demo] sponsor progress", err));
+  await sampleReplies(user, eventId).catch((err) => console.error("[demo] replies", err));
   if (opts.trail !== false) await sampleInboxAndMeetings(user, eventId);
+}
+
+/**
+ * A sponsor pipeline a few weeks in: one offer, one reply, emails opened and
+ * sent, so the Sponsors overview has a real funnel. Only runs while every
+ * sponsor is still untouched; does nothing if there are none yet.
+ */
+export async function sampleSponsorProgress(eventId: string) {
+  const list = await query<{ id: string; status: string; ask: string | null }>("SELECT id, status, ask FROM sponsors WHERE event_id = $1 ORDER BY created_at, company", [eventId]);
+  if (!list.length || list.some((s) => s.status !== "found")) return;
+  const askRM = (a: string | null) => Number(a?.match(/RM\s?([\d,]+)/i)?.[1]?.replace(/,/g, "")) || 0;
+  const steps: [string, number][] = [["accepted", 9], ["replied", 7], ["opened", 6], ["contacted", 4], ["declined", 8]];
+  for (const [i, s] of list.slice(0, steps.length).entries()) {
+    const [status, ago] = steps[i];
+    const at = `now() - interval '${ago} days'`;
+    if (status === "accepted") {
+      const amount = Math.min(3000, Math.max(500, askRM(s.ask) || 1000));
+      await query(
+        `UPDATE sponsors SET status = 'accepted', contacted_at = ${at}, opened_at = ${at} + interval '1 day', replied_at = ${at} + interval '3 days', decided_at = ${at} + interval '4 days', offer_type = 'cash', offer_amount = $2, offer_note = 'Logo on the poster and a booth' WHERE id = $1`,
+        [s.id, amount],
+      );
+    } else if (status === "declined") {
+      await query(`UPDATE sponsors SET status = 'declined', contacted_at = ${at}, decided_at = ${at} + interval '5 days', notes = 'No budget left this quarter, try again next semester' WHERE id = $1`, [s.id]);
+    } else {
+      await query(
+        `UPDATE sponsors SET status = $2, contacted_at = ${at}, opened_at = CASE WHEN $2 IN ('opened','replied') THEN ${at} + interval '1 day' END, replied_at = CASE WHEN $2 = 'replied' THEN ${at} + interval '3 days' END WHERE id = $1`,
+        [s.id, status],
+      );
+    }
+  }
+}
+
+/**
+ * Replies to the mail Movents sent (caterer, facilities, sponsors, a speaker),
+ * stored as received mail, so the event inbox has both sides. Each is added once.
+ */
+export async function sampleReplies(user: import("./types").User, eventId: string) {
+  const { emailShell } = await import("./integrations/email");
+  const ev = await one<{ title: string; date: string; pax: number; venue: string | null; mailbox: string | null }>(
+    "SELECT e.title, e.date, e.pax, v.name AS venue, (SELECT address FROM event_mailboxes WHERE event_id = e.id) AS mailbox FROM events e LEFT JOIN venues v ON v.id = e.venue_id WHERE e.id = $1",
+    [eventId],
+  ).catch(() => null);
+  if (!ev) return;
+  const me = ev.mailbox ?? user.email ?? "committee@society.example";
+  const first = user.name.split(" ")[0];
+  const [food, sponsors, speaker] = await Promise.all([
+    one<{ id: string; name: string; unit_price: number }>("SELECT id, name, unit_price FROM vendors WHERE event_id = $1 AND category = 'food' AND selected = true LIMIT 1", [eventId]),
+    query<{ id: string; company: string; status: string; offer_amount: number | null; offer_note: string | null; contact_name: string | null }>("SELECT id, company, status, offer_amount, offer_note, contact_name FROM sponsors WHERE event_id = $1 AND status IN ('accepted', 'replied', 'declined')", [eventId]),
+    one<{ id: string; name: string; email: string | null }>("SELECT id, name, email FROM speakers WHERE event_id = $1 ORDER BY name LIMIT 1", [eventId]),
+  ]);
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const replies: { kind: string; from: string; related: string | null; subject: string; html: string; ago: number }[] = [
+    {
+      kind: "other_reply",
+      from: "facilities.booking@university.example",
+      related: null,
+      subject: `Re: Venue booking request: ${ev.venue ?? "venue"}`,
+      html: emailShell("Booking received", `<p>Hi ${first},</p><p>We have pencilled in <b>${ev.venue ?? "the room"}</b> for ${ev.title}. Please upload the approved proposal at least two weeks before so we can confirm the booking and the AV set-up.</p><p>Facilities Management</p>`),
+      ago: 4,
+    },
+  ];
+  if (food)
+    replies.push({
+      kind: "vendor_reply",
+      from: `sales@${slug(food.name.split(" — ")[0].split(",")[0])}.example`,
+      related: food.id,
+      subject: `Re: Quotation request, ${ev.title}`,
+      html: emailShell("Quotation", `<p>Hello ${first},</p><p>Thanks for reaching out. For ${ev.pax} pax we can do RM${Number(food.unit_price).toFixed(2)} per pax, halal certified, delivered 30 minutes before. A 30% deposit holds the date.</p><p>Best regards,<br>${food.name.split(" — ")[0]}</p>`),
+      ago: 2,
+    });
+  for (const s of sponsors) {
+    const who = s.contact_name ?? `${s.company} partnerships`;
+    const body =
+      s.status === "accepted"
+        ? `<p>Hi ${first},</p><p>Happy to support ${ev.title}. ${s.offer_amount ? `We can sponsor RM${Number(s.offer_amount).toLocaleString("en-MY")}` : "We can cover it in kind"}${s.offer_note ? ` (${s.offer_note.toLowerCase()})` : ""}. Send over the invoice details and logo specs.</p><p>${who}</p>`
+        : s.status === "replied"
+          ? `<p>Hi ${first},</p><p>Thanks for the proposal. Could you share last year's turnout and what logo placement we would get? We will decide by Friday.</p><p>${who}</p>`
+          : `<p>Hi ${first},</p><p>Thank you for thinking of us. Our budget for this quarter is committed, but do reach out again next semester.</p><p>${who}</p>`;
+    replies.push({ kind: "sponsor_reply", from: `partnerships@${slug(s.company)}.example`, related: s.id, subject: `Re: Sponsorship for ${ev.title}`, html: emailShell("Sponsorship", body), ago: s.status === "accepted" ? 5 : s.status === "replied" ? 1 : 3 });
+  }
+  if (speaker)
+    replies.push({
+      kind: "speaker_reply",
+      from: speaker.email ?? `${slug(speaker.name)}@speaker.example`,
+      related: speaker.id,
+      subject: `Re: Invitation to speak at ${ev.title}`,
+      html: emailShell("Speaking invitation", `<p>Dear ${first},</p><p>Thank you for the invitation. I would be glad to join, ideally a 30-minute talk in the morning slot. Could you send the run of show and the expected audience?</p><p>Warm regards,<br>${speaker.name}</p>`),
+      ago: 0.3,
+    });
+  for (const r of replies) {
+    const have = await one("SELECT 1 FROM emails WHERE event_id = $1 AND kind = $2 AND COALESCE(related_id, '') = $3 AND status = 'received'", [eventId, r.kind, r.related ?? ""]);
+    if (have) continue;
+    await query(
+      "INSERT INTO emails (id, event_id, kind, to_addr, intended_to, subject, body, status, provider, related_id, sent_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 'received', 'gmail', $8, $9, $9)",
+      [id("eml"), eventId, r.kind, me, r.from, r.subject, r.html, r.related, new Date(Date.now() - r.ago * 86_400_000)],
+    );
+  }
 }
 
 const FIRST = ["Aiman", "Nur Aisyah", "Jia Hui", "Arjun", "Mei Xin", "Haziq", "Siti", "Wei Lun", "Kavya", "Daniel", "Farah", "Jun Hao", "Priyanka", "Amirul", "Hui Min", "Ravi", "Alya", "Zhi Wei", "Nadia", "Marcus", "Iman", "Yi Ling", "Harith", "Sharmila"];

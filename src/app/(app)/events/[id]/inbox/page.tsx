@@ -1,7 +1,6 @@
 import { one, query } from "@/lib/db";
 import { eventEmails, getMailbox, mailGroup } from "@/lib/mailbox";
 import { EventInbox } from "@/components/app/event-inbox";
-import { DraftsPanel } from "@/components/app/drafts-panel";
 import { canViewEvent, pageUser } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
@@ -37,25 +36,21 @@ export default async function InboxPage({ params }: { params: Promise<{ id: stri
   ]);
   const slug = (ev?.title ?? "event").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "event";
   return (
-    <>
-      <DraftsPanel
-        drafts={drafts.map((d) => ({
-          id: d.id,
-          kind: d.action_type,
-          title: d.title,
-          to: String(d.payload.to ?? ""),
-          subject: String(d.payload.subject ?? ""),
-          text: plain(String(d.payload.html ?? "")).slice(0, 4000),
-          created_at: iso(d.created_at)!,
-        }))}
-      />
-      <EventInbox
-        eventId={id}
-        drafts={drafts.length}
-        mailbox={mailbox ? { address: mailbox.address, label: mailbox.label } : null}
-        suggestion={`${slug}@movents.example`}
-        mails={rows.map((r) => ({ ...r, group: mailGroup(r.kind), sent_at: iso(r.sent_at), created_at: iso(r.created_at)! }))}
-      />
-    </>
+    <EventInbox
+      eventId={id}
+      eventTitle={ev?.title ?? "Event"}
+      mailbox={mailbox ? { address: mailbox.address, label: mailbox.label } : null}
+      suggestion={`${slug}@movents.example`}
+      mails={rows.map((r) => ({ ...r, group: mailGroup(r.kind), sent_at: iso(r.sent_at), created_at: iso(r.created_at)! }))}
+      drafts={drafts.map((d) => ({
+        id: d.id,
+        kind: d.action_type,
+        title: d.title,
+        to: String(d.payload.to ?? ""),
+        subject: String(d.payload.subject ?? ""),
+        text: plain(String(d.payload.html ?? "")).slice(0, 4000),
+        created_at: iso(d.created_at)!,
+      }))}
+    />
   );
 }

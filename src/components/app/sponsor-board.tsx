@@ -61,7 +61,7 @@ function Logo({ s, size = "md" }: { s: Pick<SponsorRow, "company" | "logo_url">;
 // ------------------------------------------------------------------ overview
 
 const FUNNEL: { key: SponsorStatus; label: string; color: string }[] = [
-  { key: "found", label: "Not contacted", color: "#ece7dc" },
+  { key: "found", label: "Not contacted", color: "#c9bda6" },
   { key: "contacted", label: "Contacted", color: "#cfe3ff" },
   { key: "opened", label: "Opened", color: "#3d6cf5" },
   { key: "replied", label: "Replied", color: "#ffd84d" },

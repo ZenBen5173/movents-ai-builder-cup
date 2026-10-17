@@ -14,7 +14,8 @@ export function LiveBoxOffice() {
   const router = useRouter();
   const seen = useRef(new Set<string>());
 
-  const plans = useMemo(() => (all ?? []).filter((x) => x.source !== "builtin" || x.status === "running"), [all]);
+  // Only new projects being planned: background research and Movi edits on existing events stay on their own pages.
+  const plans = useMemo(() => (all ?? []).filter((x) => x.kind !== "custom" && (x.source !== "builtin" || x.status === "running")), [all]);
   const runs = useMemo(() => plans.filter((x) => x.status === "running"), [plans]);
 
   // A run just finished: refresh (once) so it joins the normal project list.

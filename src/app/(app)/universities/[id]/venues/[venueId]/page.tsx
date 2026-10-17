@@ -7,7 +7,7 @@ import { today } from "@/lib/appurl";
 import { overlaps } from "@/lib/planning";
 import { isMember } from "@/lib/members";
 import { VenueCalendar, type Booking } from "@/components/app/venue-calendar";
-import { FloorPlan } from "@/components/app/floor-plans";
+import { FloorPlanWithDownload } from "@/components/app/floor-plans";
 import { PLAN_IDS } from "@/lib/floor-plans";
 import { Icon } from "@/components/ep/kit";
 import type { Venue } from "@/lib/types";
@@ -75,14 +75,15 @@ export default async function VenuePage({ params }: { params: Promise<{ id: stri
       </div>
 
       <section>
-        <h3 className="mono-label mb-3 border-b-[1.5px] border-ink pb-2 font-bold">Bookings</h3>
+        <h3 className="mono-label mb-1 border-b-[1.5px] border-ink pb-2 font-bold">Availability</h3>
+        <p className="mb-3 text-xs text-muted-foreground">Bookings made through Movents, by every society here. Linking your university&apos;s room booking system will show its bookings too.</p>
         <VenueCalendar bookings={bookings} today={today()} />
       </section>
 
       <section>
         <h3 className="mono-label mb-3 border-b-[1.5px] border-ink pb-2 font-bold">Floor plan</h3>
         {PLAN_IDS.has(v.id) ? (
-          <div className="mx-auto max-w-xl"><FloorPlan venueId={v.id} /></div>
+          <FloorPlanWithDownload venueId={v.id} name={v.name} />
         ) : (
           <div className="grid place-items-center rounded-xl border-[1.5px] border-dashed border-ink/30 py-14 text-muted-foreground">
             <Icon name="file-type" size={26} />

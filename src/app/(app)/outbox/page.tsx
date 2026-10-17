@@ -12,7 +12,7 @@ export default async function OutboxPage() {
   const rows = await query<{ id: string; subject: string; status: string; created_at: string; event_id: string; event_title: string }>(
     `SELECT m.id, m.subject, m.status, m.created_at, e.id AS event_id, e.title AS event_title
      FROM emails m JOIN events e ON e.id = m.event_id
-     WHERE e.society_id = $1 AND ${visibleSql(user, 2)}
+     WHERE m.status <> 'received' AND e.society_id = $1 AND ${visibleSql(user, 2)}
      ORDER BY m.created_at DESC LIMIT 600`,
     [user.society_id, user.id],
   );

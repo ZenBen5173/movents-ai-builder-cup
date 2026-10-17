@@ -1,20 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * While your AI assistant is building an event over MCP, the event pages show it
- * working: its cursor moves over the page, the tab it is on fills from
- * skeletons as each real step lands, and the view follows it tab to tab.
- * Everything here is driven by the run's recorded steps (/api/live).
+ * While Gemini (or your AI assistant over MCP) builds an event, the event pages
+ * show it working: the view follows it tab to tab, and each tab is written in
+ * the way a person writes on paper, item by item and word by word, with the
+ * cursor at the end of the words being written. Driven by the run's recorded
+ * steps (/api/live); the data is real, only its arrival is paced.
  */
 
 export type LiveStep = { id: string; name: string; tool: string; status: string; summary: string | null };
-export type LiveRun = { id: string; eventId: string | null; title: string | null; prompt: string; status: string; source: string; steps: LiveStep[] };
+export type LiveRun = { id: string; eventId: string | null; title: string | null; prompt: string; status: string; source: string; kind?: string; steps: LiveStep[] };
 
 const toolKey = (tool: string) => (tool.split("→").pop() ?? tool).trim().split(" ")[0].replace(/^[a-z]+\./, "");
 
@@ -194,16 +195,69 @@ export function useLiveRuns(url: string) {
   return runs;
 }
 
-/** Pick a spot on something real in the content area, so the cursor looks like it is working on it. */
-function spotIn(host: HTMLElement | null, n: number) {
-  if (!host) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-  const cands = [...host.querySelectorAll<HTMLElement>("section, table, svg, li, h2, h3, [class*='rounded-xl']")].filter((el) => {
-    const r = el.getBoundingClientRect();
-    return r.width > 60 && r.height > 24 && r.top > 80 && r.bottom < window.innerHeight - 20;
+/** Things on a page that are written in as one piece (rows, cards, list items, header values). */
+const ITEM = "tr, li, article, dd, [class*='rounded-xl'], [class*='rounded-2xl']";
+const PAGE_MS = 7000; // a full tab takes about this long to write, however much is on it
+const MIN_DWELL_MS = 1600; // stay on a finished tab this long before following Gemini to the next
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Words stay whole; digits come one at a time, so numbers look worked out. */
+const tokens = (t: string) => t.match(/\s+|\d|[^\s\d]+/g) ?? [t];
+
+/** Where the end of a text node is on screen: the cursor's tip goes there. */
+function caret(node: Text) {
+  const r = document.createRange();
+  r.selectNodeContents(node);
+  const rects = r.getClientRects();
+  const last = rects[rects.length - 1];
+  return last ? { x: last.right + 1, y: last.top + last.height * 0.6 } : null;
+}
+
+/**
+ * Write one item in: blank its text, show it, then type the text back in order.
+ * Rows and cards inside it appear as the writing reaches them. Text React has
+ * changed meanwhile is left as React set it.
+ */
+async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: number; y: number }) => void, stop: () => boolean, quiet: () => void) {
+  const subs = [...el.querySelectorAll<HTMLElement>(ITEM)];
+  subs.forEach((x) => x.classList.add("mv-pending"));
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.nodeValue?.trim() && !n.parentElement?.closest("script, style, textarea, select, [data-live-skip]") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
   });
-  const el = cands.length ? cands[n % cands.length] : host;
-  const r = el.getBoundingClientRect();
-  return { x: r.left + Math.min(r.width - 30, 40 + ((n * 97) % Math.max(60, r.width - 80))), y: r.top + Math.min(r.height - 10, 18 + ((n * 53) % Math.max(30, r.height - 30))) };
+  const nodes: { node: Text; text: string }[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push({ node: n as Text, text: n.nodeValue ?? "" });
+  nodes.forEach((n) => (n.node.nodeValue = ""));
+  quiet();
+  el.classList.remove("mv-pending");
+  el.classList.add("mv-write");
+  const perTick = Math.max(1, Math.round(16 / msPerToken));
+  try {
+    for (const { node, text } of nodes) {
+      if (stop()) break;
+      for (let p = node.parentElement; p && p !== el.parentElement; p = p.parentElement) {
+        if (p.classList.contains("mv-pending")) {
+          p.classList.remove("mv-pending");
+          p.classList.add("mv-write");
+        }
+      }
+      const parts = tokens(text);
+      let out = "";
+      for (let i = 0; i < parts.length; i += perTick) {
+        if (stop() || node.nodeValue !== out) break;
+        out = parts.slice(0, i + perTick).join("");
+        node.nodeValue = out;
+        quiet();
+        const c = caret(node);
+        if (c) onCaret(c);
+        await sleep(Math.max(16, msPerToken * perTick));
+      }
+    }
+  } finally {
+    for (const { node, text } of nodes) if (text.startsWith(node.nodeValue ?? "")) node.nodeValue = text;
+    quiet();
+    subs.forEach((x) => x.classList.remove("mv-pending"));
+    el.classList.remove("mv-pending");
+    setTimeout(() => [el, ...subs].forEach((x) => x.classList.remove("mv-write")), 900);
+  }
 }
 
 export function LiveBuild({ eventId }: { eventId: string }) {
@@ -214,9 +268,12 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [pos, setPos] = useState({ x: -100, y: -100 });
+  const posRef = useRef(pos);
+  posRef.current = pos;
   const [burst, setBurst] = useState<{ x: number; y: number; k: number } | null>(null);
   const lastStep = useRef<string | null>(null);
-  const tick = useRef(0);
+  // Tabs to visit, in the order Gemini worked on them; the page being written is finished first.
+  const targets = useRef<string[]>([]);
 
   const steps = run?.steps ?? [];
   const current = steps.at(-1) ?? null;
@@ -227,80 +284,133 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const live = run && run.status === "running";
   const done = run && run.status !== "running";
   const seg = path.split(`/events/${eventId}`)[1]?.replace(/^\//, "").split("/")[0] ?? "";
+  const segRef = useRef(seg);
+  segRef.current = seg;
+  const followRef = useRef(follow);
+  followRef.current = follow;
+  const liveRef = useRef(Boolean(live));
+  liveRef.current = Boolean(live);
+  // Writing keeps going after the run ends until the tabs it worked on are written.
+  const [engaged, setEngaged] = useState(false);
+  const visited = useRef(new Set<string>());
+  useEffect(() => {
+    if (!live) return;
+    visited.current.clear();
+    setEngaged(true);
+  }, [live]);
 
-  // A new step landed: follow the assistant to its tab, show the skeleton, then reveal the fresh data.
+  // A new step landed: queue its tab, and fetch the fresh data so it can be written in.
   useEffect(() => {
     if (!current || current.id === lastStep.current) return;
     const first = lastStep.current === null;
     lastStep.current = current.id;
     if (first && !live) return;
-    if (follow && info && info.seg !== seg) router.push(`/events/${eventId}${info.seg ? `/${info.seg}` : ""}`);
-    const t1 = setTimeout(() => router.refresh(), 500);
-    const t2 = setTimeout(() => setBurst((b) => ({ ...pos, k: (b?.k ?? 0) + 1 })), 900);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
+    // Each tab once per build: parallel agents would otherwise bounce the view between tabs.
+    if (info && !visited.current.has(info.seg) && !targets.current.includes(info.seg)) targets.current.push(info.seg);
+    const t = setTimeout(() => router.refresh(), 500);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  // While the run is live, anything new on the page is held back, then written in
-  // one item at a time with the cursor on it, so you see Gemini filling the tab.
-  const queue = useRef<HTMLElement[]>([]);
+  // The writer: anything new on the page (a tab Gemini moved to, rows that just
+  // landed, a header value that changed) waits hidden, then is written in.
   useEffect(() => {
     const root = host.current?.parentElement;
-    if (!live || !root || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const q = queue.current; // one array, emptied and refilled in place
-    const seen = new WeakSet<Element>();
-    const SEL = "tr, li, article, [class*='rounded-xl'], [class*='rounded-2xl']";
-    const take = (el: Element) => {
-      if (!(el instanceof HTMLElement) || seen.has(el) || host.current?.contains(el)) return;
-      // Only the outermost new item: its children appear with it.
-      if (queue.current.some((q) => q.contains(el))) return;
+    if (!engaged || !root) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setEngaged(false);
+      return;
+    }
+    const header = document.querySelector<HTMLElement>("[data-live-write]");
+    const queue: HTMLElement[] = [];
+    let writing: HTMLElement | null = null;
+    let stopped = false;
+    const busy = (el: Element) => (writing?.contains(el) ?? false) || queue.some((q) => q.contains(el));
+    const take = (el: Element | null) => {
+      if (!(el instanceof HTMLElement) || busy(el) || host.current?.contains(el) || el.closest("[aria-busy='true']")) return;
       const r = el.getBoundingClientRect();
       if (r.width < 40 || r.height < 14) return;
-      seen.add(el);
+      // A newly queued item swallows queued pieces of itself.
+      for (let i = queue.length - 1; i >= 0; i--) if (el.contains(queue[i])) queue.splice(i, 1)[0].classList.remove("mv-pending");
       el.classList.add("mv-pending");
-      queue.current.push(el);
+      queue.push(el);
     };
-    const obs = new MutationObserver((list) => {
+    const takeAll = (scope: Element) => scope.querySelectorAll(ITEM).forEach(take);
+    const content = new MutationObserver((list) => {
       for (const m of list)
         for (const n of m.addedNodes) {
           if (!(n instanceof Element)) continue;
-          if (n.matches(SEL)) take(n);
-          else n.querySelectorAll(SEL).forEach(take);
+          if (n.matches(ITEM)) take(n);
+          else takeAll(n);
         }
-      if (queue.current.length > 60) queue.current.splice(0, queue.current.length - 60).forEach((el) => el.classList.remove("mv-pending"));
     });
-    obs.observe(root, { childList: true, subtree: true });
-    const drain = setInterval(() => {
-      const el = queue.current.shift();
-      if (!el) return;
-      el.classList.remove("mv-pending");
-      el.classList.add("mv-reveal");
-      const r = el.getBoundingClientRect();
-      if (r.bottom > 0 && r.top < window.innerHeight) setPos({ x: r.left + Math.min(r.width - 24, 36), y: r.top + Math.min(r.height / 2, 22) });
-      setTimeout(() => el.classList.remove("mv-reveal"), 1200);
-    }, 110);
-    return () => {
-      obs.disconnect();
-      clearInterval(drain);
-      q.splice(0).forEach((el) => el.classList.remove("mv-pending"));
+    const head = new MutationObserver((list) => {
+      for (const m of list) take((m.target instanceof Element ? m.target : m.target.parentElement)?.closest("dd") ?? null);
+    });
+    // Our own typing is not news.
+    const quiet = () => {
+      head.takeRecords();
+      content.takeRecords();
     };
-  }, [live]);
+    content.observe(root, { childList: true, subtree: true });
+    if (header) {
+      header.querySelectorAll("dd").forEach(take);
+      head.observe(header, { childList: true, characterData: true, subtree: true });
+    }
+    takeAll(root);
 
-  // Keep the cursor busy over the page while the run is live (when nothing is being written in).
-  const wander = useCallback(() => {
-    if (queue.current.length) return;
-    tick.current += 1;
-    setPos(spotIn(host.current?.parentElement ?? null, tick.current));
-  }, []);
-  useEffect(() => {
-    if (!live) return;
-    wander();
-    const t = setInterval(wander, 1400);
-    return () => clearInterval(t);
-  }, [live, wander, path]);
+    let arrived = Date.now();
+    let wrote = false;
+    (async () => {
+      while (!stopped) {
+        const el = queue.shift();
+        if (el) {
+          if (!el.isConnected) continue;
+          writing = el;
+          const r = el.getBoundingClientRect();
+          if (followRef.current && (r.top > window.innerHeight - 80 || r.bottom < 120)) {
+            el.scrollIntoView({ block: "center", behavior: "smooth" });
+            await sleep(380);
+          }
+          const words = el.textContent?.split(/\s+/).length ?? 1;
+          const ms = Math.min(42, Math.max(10, PAGE_MS / Math.max(1, (queue.length + 1) * Math.max(6, words))));
+          await writeIn(el, ms, (p) => setPos(p), () => stopped, quiet);
+          writing = null;
+          wrote = true;
+          await sleep(60);
+          continue;
+        }
+        if (wrote) {
+          wrote = false;
+          setBurst((b) => ({ ...posRef.current, k: (b?.k ?? 0) + 1 }));
+        }
+        // Page written: follow Gemini to the next tab it worked on.
+        if (!followRef.current) targets.current = [];
+        visited.current.add(segRef.current);
+        while (targets.current.length && visited.current.has(targets.current[0])) targets.current.shift();
+        const next = targets.current[0];
+        if (next !== undefined && Date.now() - arrived > MIN_DWELL_MS) {
+          targets.current.shift();
+          visited.current.add(next);
+          arrived = Date.now();
+          router.push(`/events/${eventId}${next ? `/${next}` : ""}`);
+          const h = root.querySelector("h2, h3, th, [class*='mono-label']")?.getBoundingClientRect();
+          if (h) setPos({ x: h.left + 12, y: h.top + 10 });
+        } else if (next === undefined && !liveRef.current) {
+          setEngaged(false);
+          return;
+        }
+        await sleep(120);
+      }
+    })();
+    return () => {
+      stopped = true;
+      content.disconnect();
+      head.disconnect();
+      queue.splice(0).forEach((el) => el.classList.remove("mv-pending"));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engaged, eventId]);
 
   if (!run || (!live && !done)) return <div ref={host} className="hidden" />;
   const doneCount = steps.filter((s) => s.status !== "running").length;
@@ -343,7 +453,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
         </AnimatePresence>
       </div>
 
-      {live && <AssistantCursor x={pos.x} y={pos.y} chip={info?.doing ?? "working"} clickKey={current?.id} name={run.source === "gemini" ? "Gemini" : "AI assistant"} thought={thought} />}
+      {(live || engaged) && <AssistantCursor x={pos.x} y={pos.y} chip={live ? (info?.doing ?? "working") : "writing it up"} name={run.source === "gemini" ? "Gemini" : "AI assistant"} thought={thought} />}
       {burst && <Sparkles x={burst.x} y={burst.y} k={burst.k} />}
     </div>
   );

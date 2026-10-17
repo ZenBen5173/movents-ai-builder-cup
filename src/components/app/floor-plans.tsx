@@ -145,3 +145,36 @@ export function FloorPlan({ venueId, className }: { venueId: string; className?:
   const Plan = PLANS[venueId];
   return Plan ? <Plan className={className} /> : null;
 }
+
+/** The plan with a download, so a committee edits it for their layout instead of drawing it again. */
+export function FloorPlanWithDownload({ venueId, name }: { venueId: string; name: string }) {
+  const [saved, setSaved] = useState(false);
+  const download = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const svg = e.currentTarget.closest("[data-plan]")?.querySelector("svg");
+    if (!svg) return;
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const url = URL.createObjectURL(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${clone.outerHTML}`], { type: "image/svg+xml" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-floor-plan.svg`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+  return (
+    <div data-plan className="mx-auto max-w-xl">
+      <FloorPlan venueId={venueId} />
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Editable in Figma, Canva or draw.io. Move the tables, then attach it to your proposal.</p>
+        <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.95 }} onClick={download} className="flex h-9 items-center gap-2 rounded-lg border-[1.5px] border-ink bg-sun px-3 text-sm font-semibold shadow-[2px_2px_0_0_#161514]">
+          <motion.svg key={String(saved)} initial={{ y: -3, opacity: 0 }} animate={{ y: 0, opacity: 1 }} viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            {saved ? <path d="M5 12.5l4.5 4.5L19 7.5" /> : <path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14" />}
+          </motion.svg>
+          {saved ? "Downloaded" : "Download floor plan"}
+        </motion.button>
+      </div>
+    </div>
+  );
+}

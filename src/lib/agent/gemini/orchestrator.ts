@@ -478,6 +478,11 @@ export async function researchEvent(user: User, eventId: string, what: { speaker
     }
     if (what.speakers) await run.output("Speakers", `/events/${eventId}/speakers`, "page");
     if (what.sponsors) await run.output("Sponsors", `/events/${eventId}/sponsors`, "page");
+    if (user.email?.endsWith("@movents.test")) {
+      const demo = await import("../../demo");
+      if (what.sponsors) await demo.sampleSponsorProgress(eventId).catch(() => null);
+      await demo.sampleReplies(user, eventId).catch(() => null);
+    }
     const summary = run.steps.filter((s) => !s.tool.includes("→ save")).map((s) => s.summary).filter(Boolean).join(" ");
     await run.finish({ event_id: eventId, summary: summary || `Researched ${topic} with Google Search` });
     return { run_id: run.id, summary };

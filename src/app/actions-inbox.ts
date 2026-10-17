@@ -46,3 +46,25 @@ export async function decideDraftAction(draftId: string, decision: "send" | "dis
     return { ok: false, error: publicError(err) };
   }
 }
+
+/** Write a new email from the event's mailbox (Compose, Reply, Forward). Filed under the event's label. */
+export async function composeEmail(eventId: string, mail: { to: string; subject: string; body: string }): Promise<Res> {
+  try {
+    const user = await requireUser();
+    await assertMember(user, eventId);
+    const to = mail.to.trim();
+    const subject = mail.subject.trim().slice(0, 200);
+    const body = mail.body.trim().slice(0, 20_000);
+    if (!EMAIL_RE.test(to)) throw new Error("That is not an email address");
+    if (!subject || !body) throw new Error("Write a subject and a message");
+    const { esc } = await import("@/lib/html");
+    const { gate } = await import("@/lib/actions");
+    const html = body.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+    const r = await gate(user, "email.vendor", `Email to ${to}`, { to, subject, html, kind: "other", event_id: eventId }, { eventId });
+    revalidatePath(`/events/${eventId}/inbox`);
+    if (r.status === "failed") throw new Error(r.error);
+    return { ok: true, message: r.status === "blocked" ? "Sent for sign-off" : "Sent" };
+  } catch (err) {
+    return { ok: false, error: publicError(err) };
+  }
+}

@@ -6,7 +6,7 @@ import type { AgentStep } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type Row = { id: string; event_id: string | null; prompt: string; status: string; source: string; steps: AgentStep[]; finished_at: string | null; title: string | null };
+type Row = { id: string; event_id: string | null; prompt: string; status: string; source: string; kind: string; steps: AgentStep[]; finished_at: string | null; title: string | null };
 
 const slim = (r: Row) => ({
   id: r.id,
@@ -15,6 +15,7 @@ const slim = (r: Row) => ({
   prompt: r.prompt,
   status: r.status,
   source: r.source,
+  kind: r.kind,
   steps: (r.steps ?? []).map((s) => ({ id: s.id, name: s.name, tool: s.tool, status: s.status, summary: s.summary ?? null })),
 });
 
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
   const event = new URL(req.url).searchParams.get("event");
   // Runs this user started, or on events they can see in their society.
   const rows = await query<Row>(
-    `SELECT r.id, r.event_id, r.prompt, r.status, r.source, r.steps, r.finished_at, e.title
+    `SELECT r.id, r.event_id, r.prompt, r.status, r.source, r.kind, r.steps, r.finished_at, e.title
      FROM agent_runs r LEFT JOIN events e ON e.id = r.event_id
      WHERE (r.status = 'running' OR r.finished_at > now() - interval '12 seconds')
        AND r.created_at > now() - interval '2 hours'

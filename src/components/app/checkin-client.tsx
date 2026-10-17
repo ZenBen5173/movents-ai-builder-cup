@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Camera, CameraOff, Check, Search } from "lucide-react";
+import { Camera, CameraOff, Search, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { checkIn, checkInByTicket } from "@/app/actions";
 import { fireConfetti } from "@/components/ep/kit";
@@ -11,6 +11,7 @@ import { Pill } from "@/components/app/ui";
 import { cn } from "@/lib/utils";
 import { SPRING } from "@/lib/motion";
 import type { Rsvp } from "@/lib/types";
+import { ScanGuest } from "@/components/app/scan-guest";
 
 type TabId = "all" | "in" | "out" | "waitlist" | "absent";
 const TABS: { id: TabId; label: string; test: (r: Rsvp) => boolean }[] = [
@@ -25,12 +26,45 @@ const hhmm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("en
 /** Name, status, time in, action: same widths on every row so the columns line up. */
 const COLS = "grid grid-cols-[minmax(0,1fr)_112px] items-center gap-3 sm:grid-cols-[minmax(0,1fr)_96px_56px_112px]";
 
+type Welcome = { name: string; ticket?: string; note?: string | null; at: string; again?: boolean };
+
+/** The unmistakable "you're in": a stamped ticket with the guest's name and the time. */
+function WelcomeCard({ w }: { w: Welcome }) {
+  return (
+    <motion.div
+      key={w.name + w.at}
+      initial={{ opacity: 0, y: -10, scale: 0.9, rotate: -2 }}
+      animate={{ opacity: 1, y: 0, scale: 1, rotate: 0 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 420, damping: 24 }}
+      role="status"
+      className="relative mt-3 flex items-center gap-4 overflow-hidden rounded-2xl border-[1.5px] border-ink bg-mint px-5 py-4 shadow-[3px_3px_0_0_#161514]"
+    >
+      <motion.span initial={{ scale: 0, rotate: -40 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.08 }} className="grid size-12 shrink-0 place-items-center rounded-full border-[1.5px] border-ink bg-[#46a758] text-white">
+        <svg viewBox="0 0 24 24" className="size-7" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.35, delay: 0.2 }} />
+        </svg>
+      </motion.span>
+      <div className="min-w-0 flex-1">
+        <p className="mono-label text-[10px] text-ink/60">{w.again ? "Already checked in" : "Checked in"} · {w.at}</p>
+        <p className="truncate font-display text-2xl font-bold leading-tight">{w.name}</p>
+        {(w.ticket || w.note) && <p className="truncate text-xs text-ink/70">{[w.ticket, w.note].filter(Boolean).join(" · ")}</p>}
+      </div>
+      <motion.span initial={{ opacity: 0, scale: 1.8, rotate: -18 }} animate={{ opacity: 1, scale: 1, rotate: -12 }} transition={{ delay: 0.25, type: "spring", stiffness: 300, damping: 12 }} className="hidden shrink-0 rounded-lg border-[3px] border-[#2f7a3c] px-2 py-0.5 font-display text-lg font-black uppercase tracking-wider text-[#2f7a3c] sm:block">
+        Welcome
+      </motion.span>
+    </motion.div>
+  );
+}
+
 /** Door check-in: search a name and tap, or point the laptop webcam at a ticket QR. */
 export function CheckinClient({ eventId, title, rows }: { eventId: string; title: string; rows: Rsvp[] }) {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<TabId>("all");
   const [scan, setScan] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
+  const [flash, setFlash] = useState<Welcome | null>(null);
+  // No camera (or practising): a drawn guest shows a real ticket from the list.
+  const [guest, setGuest] = useState<Rsvp | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const video = useRef<HTMLVideoElement>(null);
@@ -48,18 +82,20 @@ export function CheckinClient({ eventId, title, rows }: { eventId: string; title
       .slice(0, 120);
   }, [rows, q, tab]);
 
-  const celebrate = (msg: string) => {
-    setFlash(msg);
-    fireConfetti();
+  const now = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
+  const celebrate = (w: Omit<Welcome, "at">) => {
+    setFlash({ ...w, at: now() });
+    if (!w.again) fireConfetti();
     navigator.vibrate?.(60);
-    setTimeout(() => setFlash(null), 2200);
+    setTimeout(() => setFlash((f) => (f?.name === w.name ? null : f)), 4500);
   };
+  const nextGuest = () => rows.find((r) => r.status === "going" && !r.checked_in && r.id !== guest?.id) ?? null;
 
   const byName = (r: Rsvp) =>
     start(async () => {
       const res = await checkIn(r.id, !r.checked_in);
       if (!res.ok) return void toast.error(res.error);
-      if (!r.checked_in) celebrate(r.name);
+      if (!r.checked_in) celebrate({ name: r.name, ticket: r.ticket, note: [r.dietary, r.accessibility].filter(Boolean).join(" · ") || null });
       router.refresh();
     });
 
@@ -88,7 +124,8 @@ export function CheckinClient({ eventId, title, rows }: { eventId: string; title
           busy = true;
           const res = await checkInByTicket(eventId, ticket);
           if (res.ok) {
-            celebrate(res.message?.replace(/ (was already )?checked in$/, "") ?? ticket);
+            const r = rows.find((x) => x.ticket.toUpperCase() === ticket.toUpperCase());
+            celebrate({ name: r?.name ?? res.message?.replace(/ (was already )?checked in$/, "") ?? ticket, ticket, note: r ? [r.dietary, r.accessibility].filter(Boolean).join(" · ") || null : null, again: /already/.test(res.message ?? "") });
             router.refresh();
           } else toast.error(res.error);
           setTimeout(() => {
@@ -110,8 +147,13 @@ export function CheckinClient({ eventId, title, rows }: { eventId: string; title
         }
         raf = requestAnimationFrame(tick);
       } catch {
-        toast.error("Camera unavailable");
-        setScan(false);
+        // No camera here: show how a scan works with the next guest on the list.
+        const g = nextGuest();
+        if (g) setGuest(g);
+        else {
+          toast.error("Camera unavailable");
+          setScan(false);
+        }
       }
     })();
     return () => {
@@ -144,35 +186,64 @@ export function CheckinClient({ eventId, title, rows }: { eventId: string; title
           <Search className="absolute left-3.5 top-3.5 size-5 text-muted-foreground" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name" autoFocus className="h-12 w-full rounded-xl border-[1.5px] border-ink bg-card pl-11 pr-3 text-base outline-none focus:shadow-[3px_3px_0_0_#ff5a36]" />
         </div>
-        <motion.button whileTap={{ scale: 0.95 }} onClick={() => setScan((s) => !s)} className={cn("flex h-12 items-center gap-2 rounded-xl border-[1.5px] border-ink px-4 text-sm font-semibold", scan ? "bg-ink text-white" : "bg-tomato shadow-[2px_2px_0_0_#161514]")}>
+        <motion.button whileTap={{ scale: 0.95 }} onClick={() => {
+            setScan((s) => !s);
+            setGuest(null);
+          }} className={cn("flex h-12 items-center gap-2 rounded-xl border-[1.5px] border-ink px-4 text-sm font-semibold", scan ? "bg-ink text-white" : "bg-tomato shadow-[2px_2px_0_0_#161514]")}>
           {scan ? <CameraOff className="size-5" /> : <Camera className="size-5" />}
           {scan ? "Stop" : "Scan QR"}
         </motion.button>
       </div>
 
+      <AnimatePresence mode="wait">{flash && <WelcomeCard w={flash} />}</AnimatePresence>
       <AnimatePresence>
         {scan && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
             <div className="relative mt-3 overflow-hidden rounded-2xl border-[1.5px] border-ink bg-ink">
-              <video ref={video} playsInline muted className="aspect-video w-full -scale-x-100 object-cover" />
-              <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center">
-                <div className="relative size-48 rounded-2xl border-[3px] border-white/90">
-                  <motion.span className="absolute inset-x-2 h-0.5 bg-tomato" animate={{ top: ["8%", "92%", "8%"] }} transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }} />
-                </div>
-              </div>
+              {guest ? (
+                <ScanGuest
+                  key={guest.id}
+                  name={guest.name}
+                  ticket={guest.ticket}
+                  onScanned={async () => {
+                    const res = await checkInByTicket(eventId, guest.ticket);
+                    if (!res.ok) {
+                      toast.error(res.error);
+                      return false;
+                    }
+                    celebrate({ name: guest.name, ticket: guest.ticket, note: [guest.dietary, guest.accessibility].filter(Boolean).join(" · ") || null });
+                    router.refresh();
+                    return true;
+                  }}
+                />
+              ) : (
+                <>
+                  <video ref={video} playsInline muted className="aspect-video w-full -scale-x-100 object-cover" />
+                  <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center">
+                    <div className="relative size-48 rounded-2xl border-[3px] border-white/90">
+                      <motion.span className="absolute inset-x-2 h-0.5 bg-tomato" animate={{ top: ["8%", "92%", "8%"] }} transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }} />
+                    </div>
+                  </div>
+                </>
+              )}
               <canvas ref={canvas} className="hidden" />
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  const g = nextGuest();
+                  if (g) setGuest(g);
+                  else toast.message("Everyone on the list is in");
+                }}
+                className="absolute bottom-3 right-3 flex h-8 items-center gap-1.5 rounded-full border-[1.5px] border-white/70 bg-black/50 px-3 text-xs font-semibold text-white backdrop-blur transition-colors hover:bg-black/70"
+              >
+                <UserRound className="size-3.5" /> {guest ? "Next guest" : "Practice with a sample guest"}
+              </motion.button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {flash && (
-          <motion.div key={flash} initial={{ opacity: 0, y: -8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} className="mt-3 flex items-center gap-2 rounded-xl border-[1.5px] border-ink bg-mint px-4 py-3 font-semibold">
-            <Check className="size-5" /> {flash}
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="mt-6 flex gap-5 overflow-x-auto border-b-[1.5px] border-ink scrollbar-thin">
         {tabs.map((t) => (
