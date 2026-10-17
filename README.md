@@ -112,6 +112,7 @@ A typical plan comes to about 25 to 31 hours. These are estimates, not measureme
 flowchart LR
   U[Organiser] -->|one prompt| W[Movents web app<br/>Next.js on Cloud Run]
   W -->|live trace| U
+  FS[(Cloud Firestore<br/>live agent runs)] -->|polled every 0.7 s| W
   subgraph Agents[Gemini agents on Vertex AI]
     P[Planner] --> S[Speaker agent]
     P --> B[Budget agent]
@@ -123,6 +124,7 @@ flowchart LR
     C -->|re-plan| B & R & PR
   end
   W --> Agents
+  Agents -->|every step| FS
   S & B & SP -->|grounded search + citations| G[Google Search]
   Agents -->|function calling| T[54 Movents tools<br/>role and team checks]
   T --> DB[(Postgres on Neon)]
@@ -136,7 +138,8 @@ flowchart LR
   the MCP server at `/api/mcp` for outside assistants.
 - **Agent loop** (`src/lib/agent/gemini/loop.ts`): Gemini picks a tool, Movents checks membership and role, runs it,
   and sends the result back, until Gemini answers in text. Tool errors go back to the model so it can correct itself.
-- **Live trace:** every step, check and adaptation is written to the run as it happens; `/runs/:id` polls it.
+- **Live trace:** every step, check and adaptation is written to the run in Cloud Firestore as it happens;
+  `/runs/:id` and the live build poll it. Postgres keeps the same run as the record of truth and the fallback.
 - **Stack:** Next.js 15 (App Router), React 19, Tailwind CSS 4, Postgres through `postgres` (PGlite for local
   development and tests), `docx`, `pdf-lib` and `exceljs` for the documents.
 
@@ -147,13 +150,15 @@ flowchart LR
 | **Vertex AI: Gemini** (gemini-3-flash-preview, falling back to 3.5-flash-lite and 3.5-flash) | Planner, six specialist agents, checker and summary: function calling and JSON output |
 | **Grounding with Google Search** | Real speakers, supplier prices and sponsors, with citations |
 | **Cloud Run** (asia-southeast1) | The app, with CPU always on so agent runs continue after the request returns |
+| **Cloud Firestore** (Native mode, asia-southeast1) | Live agent runs (collection `agent_runs`): one document per Gemini run, written on every step, read in real time by the run timeline and the live build |
 | **Cloud Build + Artifact Registry** | Builds the container from source |
 | **Secret Manager** | Database URL, app secret and cron secret |
 | **Cloud Scheduler** | Daily automations: speaker follow-ups, reminders, spend alerts |
 | **Cloud Logging** | Gemini retries and errors |
-| **IAM** | A dedicated service account; Vertex AI access without API keys |
+| **IAM** | A dedicated service account; Vertex AI and Firestore access without API keys |
 
-Data lives in Postgres on Neon (free tier, Singapore).
+Live agent runs are in Cloud Firestore, reached through its REST API with the service account's token (no key).
+Everything else (events, tasks, budgets, the record of each run) lives in Postgres on Neon (free tier, Singapore).
 
 ## Try it in 2 minutes
 
@@ -229,6 +234,7 @@ Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 | `src/lib/agent/gemini/` | Orchestrator, agent loop, grounded research, brief parsing |
 | `src/lib/ai/gemini.ts` | Gemini client: Vertex AI or API key, model fallback, retries |
 | `src/lib/agent/registry.ts` | The 54 tools, shared by the Gemini agents, Movi and MCP |
+| `src/lib/runstore.ts` | Live agent runs in Cloud Firestore, with Postgres as the fallback |
 | `src/lib/actions.ts` | The approval gate for every outbound action |
 | `src/lib/planning.ts` | Deterministic planning: timeline, venue, budget, risks |
 | `src/lib/agent/gemini/assistant.ts` | Movi: edit an event from a sentence, as proposals you accept |
