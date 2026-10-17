@@ -552,6 +552,7 @@ export function DataTable({
                     {!collapsed && rows.map((row, rIdx) => (
                       <div
                         key={rowId(row) || `${group.value}-${rIdx}`}
+                        data-live-item
                         className={cn(
                           "flex border-t border-[var(--border)] transition-colors",
                           "hover:bg-muted/40"
@@ -584,6 +585,7 @@ export function DataTable({
                   <div
                     key={rowId(row) || virtualRow.index}
                     data-index={virtualRow.index}
+                    data-live-item
                     ref={virtualizer.measureElement}
                     className={cn(
                       "flex border-t border-[var(--border)] transition-colors",

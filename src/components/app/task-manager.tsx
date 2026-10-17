@@ -349,6 +349,7 @@ function Timeline({ tasks, critical, eventDate, onOpen }: { tasks: TaskItem[]; c
               return (
                 <motion.button
                   key={t.id}
+                  data-live-item
                   onClick={() => onOpen(t)}
                   onMouseMove={(e) => {
                     const r = scroller.current!.getBoundingClientRect();
@@ -465,7 +466,9 @@ export function TaskManager({ eventId, eventDate, tasks, people, critical, today
   const [me, setMe] = useState<string | null>(null);
   useEffect(() => {
     try {
-      const v = localStorage.getItem("ep-task-view") as View | null;
+      // ?view= (a link, or the live build showing every task) wins over the remembered view.
+      const q = new URLSearchParams(window.location.search).get("view") as View | null;
+      const v = q && ["board", "list", "timeline"].includes(q) ? q : (localStorage.getItem("ep-task-view") as View | null);
       if (v) setView(v);
     } catch {}
   }, []);

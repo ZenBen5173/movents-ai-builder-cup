@@ -196,7 +196,7 @@ export function useLiveRuns(url: string) {
 }
 
 /** Things on a page that are written in as one piece (rows, cards, list items, header values). */
-const ITEM = "tr, li, article, dd, [class*='rounded-xl'], [class*='rounded-2xl']";
+const ITEM = "tr, li, article, dd, [data-live-item], [class*='rounded-xl'], [class*='rounded-2xl']";
 const PAGE_MS = 7000; // a full tab takes about this long to write, however much is on it
 const MIN_DWELL_MS = 1600; // stay on a finished tab this long before following Gemini to the next
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -306,7 +306,11 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     lastStep.current = current.id;
     if (first && !live) return;
     // Each tab once per build: parallel agents would otherwise bounce the view between tabs.
-    if (info && !visited.current.has(info.seg) && !targets.current.includes(info.seg)) targets.current.push(info.seg);
+    // Opened mid-run: also tour the tabs Gemini already finished, in the order it did them.
+    for (const st of first ? steps : [current]) {
+      const seg = stepInfo(st.tool, st.name).seg;
+      if (!visited.current.has(seg) && !targets.current.includes(seg)) targets.current.push(seg);
+    }
     const t = setTimeout(() => router.refresh(), 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,15 +329,19 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     const queue: HTMLElement[] = [];
     let writing: HTMLElement | null = null;
     let stopped = false;
+    // When the page last got something new: the pause before the next tab counts from here.
+    let arrived = Date.now();
+    let pending: string | null = null;
+    let pushedAt = 0;
     const busy = (el: Element) => (writing?.contains(el) ?? false) || queue.some((q) => q.contains(el));
     const take = (el: Element | null) => {
+      // Size is checked when it is written: a board or list that animates in has none yet.
       if (!(el instanceof HTMLElement) || busy(el) || host.current?.contains(el) || el.closest("[aria-busy='true']")) return;
-      const r = el.getBoundingClientRect();
-      if (r.width < 40 || r.height < 14) return;
       // A newly queued item swallows queued pieces of itself.
       for (let i = queue.length - 1; i >= 0; i--) if (el.contains(queue[i])) queue.splice(i, 1)[0].classList.remove("mv-pending");
       el.classList.add("mv-pending");
       queue.push(el);
+      arrived = Date.now();
     };
     const takeAll = (scope: Element) => scope.querySelectorAll(ITEM).forEach(take);
     const content = new MutationObserver((list) => {
@@ -359,15 +367,18 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     }
     takeAll(root);
 
-    let arrived = Date.now();
     let wrote = false;
     (async () => {
       while (!stopped) {
         const el = queue.shift();
         if (el) {
           if (!el.isConnected) continue;
-          writing = el;
           const r = el.getBoundingClientRect();
+          if ((r.width < 40 || r.height < 14) && (el.textContent?.trim().length ?? 0) < 3) {
+            el.classList.remove("mv-pending");
+            continue;
+          }
+          writing = el;
           if (followRef.current && (r.top > window.innerHeight - 80 || r.bottom < 120)) {
             el.scrollIntoView({ block: "center", behavior: "smooth" });
             await sleep(380);
@@ -384,6 +395,18 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           wrote = false;
           setBurst((b) => ({ ...posRef.current, k: (b?.k ?? 0) + 1 }));
         }
+        // Just moved: wait for the new tab to load (up to 8 s) before deciding it is written.
+        if (pending !== null) {
+          // React keeps an old loading placeholder hidden in the page; only a visible one means loading.
+          const loading = [...root.querySelectorAll<HTMLElement>("[aria-busy='true']")].some((x) => x.offsetParent !== null);
+          if ((segRef.current !== pending || loading) && Date.now() - pushedAt < 8000) {
+            await sleep(120);
+            continue;
+          }
+          pending = null;
+          arrived = Date.now();
+          continue;
+        }
         // Page written: follow Gemini to the next tab it worked on.
         if (!followRef.current) targets.current = [];
         visited.current.add(segRef.current);
@@ -392,8 +415,10 @@ export function LiveBuild({ eventId }: { eventId: string }) {
         if (next !== undefined && Date.now() - arrived > MIN_DWELL_MS) {
           targets.current.shift();
           visited.current.add(next);
-          arrived = Date.now();
-          router.push(`/events/${eventId}${next ? `/${next}` : ""}`);
+          pending = next;
+          pushedAt = Date.now();
+          // Tasks opens on the timeline: every task, planned back from the event day.
+          router.push(`/events/${eventId}${next ? `/${next}` : ""}${next === "tasks" ? "?view=timeline" : ""}`);
           const h = root.querySelector("h2, h3, th, [class*='mono-label']")?.getBoundingClientRect();
           if (h) setPos({ x: h.left + 12, y: h.top + 10 });
         } else if (next === undefined && !liveRef.current) {
