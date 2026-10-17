@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUpRight, Download, Folder } from "lucide-react";
 import { TreeExpander, TreeIcon, TreeLabel, TreeNode, TreeNodeContent, TreeNodeTrigger, TreeProvider, TreeView } from "@/components/kibo-ui/tree";
@@ -46,6 +46,12 @@ function Node({ f, level, isLast }: { f: FolderNode; level: number; isLast: bool
 /** Folder tree on the left (library Tree View), the open folder's files on the right. */
 export function FileBrowser({ tree }: { tree: FolderNode[] }) {
   const [sel, setSel] = useState<string[]>([tree[0]?.id ?? ""]);
+  // ?folder= opens a folder directly (a link, or the live build showing the proposal).
+  useEffect(() => {
+    const f = new URLSearchParams(window.location.search).get("folder");
+    if (f && find(tree, f)) setSel([f]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const trail = find(tree, sel[0] ?? "") ?? [tree[0]];
   const open = trail[trail.length - 1];
   return (

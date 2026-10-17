@@ -477,8 +477,9 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           visited.current.add(next);
           pending = next;
           pushedAt = Date.now();
-          // Tasks opens on the timeline: every task, planned back from the event day.
-          router.push(`/events/${eventId}${next ? `/${next}` : ""}${next === "tasks" ? "?view=timeline" : ""}`);
+          // Tasks opens on the timeline (every task, planned back from the event day); Files on the proposal.
+          const query = next === "tasks" ? "?view=timeline" : next === "outputs" ? "?folder=proposal" : "";
+          router.push(`/events/${eventId}${next ? `/${next}` : ""}${query}`);
           const h = root.querySelector("h2, h3, th, [class*='mono-label']")?.getBoundingClientRect();
           if (h) setPos({ x: h.left + 12, y: h.top + 10 });
         } else if (!upNext && !liveRef.current) {
