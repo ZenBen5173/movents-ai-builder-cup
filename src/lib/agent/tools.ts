@@ -215,9 +215,13 @@ export async function checkLeads(eventId: string) {
 export async function matchVenue(eventId: string, predicted?: number) {
   const { ev, uni } = await eventContext(eventId);
   const venues = await query<Venue>("SELECT * FROM venues WHERE university_id = $1", [uni.id]);
+  // Demo sandboxes are private worlds: one visitor's demo events never take another's venue.
   const bookings = await query<{ id: string; venue_id: string | null; date: string; start_time: string; end_time: string; title: string }>(
-    "SELECT id, venue_id, date, start_time, end_time, title FROM events WHERE date = $1 AND id <> $2 AND venue_id IS NOT NULL",
-    [ev.date, ev.id],
+    `SELECT e.id, e.venue_id, e.date, e.start_time, e.end_time, e.title
+     FROM events e JOIN societies s ON s.id = e.society_id LEFT JOIN users u ON u.id = s.created_by
+     WHERE e.date = $1 AND e.id <> $2 AND e.venue_id IS NOT NULL
+       AND (e.society_id = $3 OR COALESCE(u.email, '') NOT LIKE '%@movents.test')`,
+    [ev.date, ev.id, ev.society_id],
   );
   const need = Math.max(ev.pax, predicted ?? 0);
   const r = selectVenue(venues, bookings, need, ev);

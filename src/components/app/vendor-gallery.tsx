@@ -84,7 +84,7 @@ export function VendorGallery({ vendors, rows }: { vendors: GalleryVendor[]; row
                 <a href={v.url ?? "#"} target="_blank" rel="noreferrer" className="group block">
                   <div className="relative aspect-[4/3] overflow-hidden rounded-xl border-[1.5px] border-ink bg-sand shadow-[3px_3px_0_0_#161514] transition-all group-hover:-translate-y-0.5 group-hover:shadow-[5px_5px_0_0_#161514]">
                     { }
-                    <img src={v.photo} alt="" loading="lazy" className="size-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                    <img src={v.photo} alt="" className="size-full bg-sand object-cover transition-transform duration-500 group-hover:scale-105" />
                     {v.unit_price != null && (
                       <span className="absolute left-3 top-3 rounded-md border-[1.5px] border-ink bg-card px-2 py-0.5 font-mono text-xs font-bold">
                         RM{v.unit_price}

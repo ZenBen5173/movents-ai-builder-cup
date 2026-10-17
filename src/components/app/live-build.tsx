@@ -263,17 +263,25 @@ async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: nu
   // Pictures, bars and charts have no words: each shows once the writing reaches it.
   const blank = subs.filter((x) => !x.textContent?.trim());
   const reach = (node: Node) => {
+    let shown = false;
     for (const b of blank)
       if (b.classList.contains("mv-pending") && b.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) {
         b.classList.remove("mv-pending");
         b.classList.add("mv-write");
+        shown = true;
       }
+    return shown;
+  };
+  // A picture still being drawn (data-live-wait) is waited for, up to 8 s, so it is seen before the words below it.
+  const settle = async () => {
+    const until = Date.now() + 8000;
+    while (!stop() && Date.now() < until && el.querySelector("[data-live-wait]")) await sleep(150);
   };
   try {
     for (const { node, text } of nodes) {
       if (stop()) break;
       if (!node.isConnected) continue; // replaced by fresh data meanwhile: that is queued on its own
-      reach(node);
+      if (reach(node)) await settle();
       for (let p = node.parentElement; p && p !== el.parentElement; p = p.parentElement) {
         if (p.classList.contains("mv-pending")) {
           p.classList.remove("mv-pending");

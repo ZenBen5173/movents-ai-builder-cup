@@ -198,7 +198,7 @@ function StableImage({ src, alt }: { src: string; alt: string }) {
   }, [src]);
   if (!shown)
     return (
-      <span className="grid size-full place-items-center bg-[linear-gradient(110deg,#efe8da_30%,#f8f3ea_50%,#efe8da_70%)] bg-[length:200%_100%] animate-[shimmer_1.4s_linear_infinite] text-center">
+      <span data-live-wait className="grid size-full place-items-center bg-[linear-gradient(110deg,#efe8da_30%,#f8f3ea_50%,#efe8da_70%)] bg-[length:200%_100%] animate-[shimmer_1.4s_linear_infinite] text-center">
         <span className="flex flex-col items-center gap-1.5 text-xs font-medium text-ink/60">
           <Sparkles className="size-4 text-tomato" />
           Drawing the {alt.toLowerCase().includes("story") ? "story" : "design"}…
