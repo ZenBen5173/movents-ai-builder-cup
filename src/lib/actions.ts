@@ -132,7 +132,7 @@ async function draft(user: User, action: ActionType, title: string, payload: Pay
  * Send (or discard) a draft the AI prepared. Only the person it was drafted
  * for can do it; sending goes through the gate as their own action.
  */
-export async function decideDraft(user: User, draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string } = {}) {
+export async function decideDraft(user: User, draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string; body?: string } = {}) {
   const d = await one<ApprovalRequest>("SELECT * FROM approval_requests WHERE id = $1 AND status = 'draft' AND requested_by = $2", [draftId, user.id]);
   if (!d) throw new Error("Draft not found, or already sent");
   if (decision === "discard") {
@@ -142,6 +142,8 @@ export async function decideDraft(user: User, draftId: string, decision: "send" 
   const to = (edits.to ?? String(d.payload.to ?? "")).trim();
   if (d.action_type.startsWith("email.") && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error("Add a valid email address first");
   const payload: Record<string, unknown> = { ...d.payload, ...(d.action_type.startsWith("email.") ? { to } : {}), ...(edits.subject?.trim() ? { subject: edits.subject.trim() } : {}) };
+  // A message rewritten by hand replaces the drafted one, as plain paragraphs.
+  if (edits.body?.trim()) payload.html = edits.body.trim().slice(0, 20_000).split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
   // Remember a speaker's or sponsor's address for next time.
   if (to && d.action_type === "email.speaker" && payload.speaker_id) await update("speakers", String(payload.speaker_id), { email: to });
   if (to && d.action_type === "email.sponsor" && payload.sponsor_id) await update("sponsors", String(payload.sponsor_id), { contact_email: to });

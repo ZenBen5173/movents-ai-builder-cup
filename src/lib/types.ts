@@ -155,6 +155,8 @@ export type BudgetLine = {
   event_id: string;
   /** Added by hand; kept when the budget is re-drafted. */
   custom?: boolean;
+  /** Which planned item this line is (food, lanyard...), when the planner made it. */
+  line_key?: string | null;
   category: string;
   description: string;
   vendor_id: string | null;

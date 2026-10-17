@@ -2,15 +2,16 @@
 
 import { useOptimistic, useTransition } from "react";
 import { motion } from "motion/react";
-import { Check, Instagram, Linkedin, Mail, MessageCircle, StickyNote } from "lucide-react";
-import { setPromo } from "@/app/actions";
+import { Check, Instagram, Linkedin, Mail, MessageCircle, Plus, StickyNote } from "lucide-react";
+import { addPromoItem, removePromoItem, setPromo, updatePromoItem } from "@/app/actions";
+import { RecordEditor } from "@/components/app/record-editor";
 import { cn } from "@/lib/utils";
 
 const ICON: Record<string, React.ComponentType<{ className?: string }>> = { Instagram, LinkedIn: Linkedin, Email: Mail, Poster: StickyNote, WhatsApp: MessageCircle };
 
 type Item = { id: string; channel: string; title: string; due_date: string; status: string; link: string | null };
 
-export function PromoChecklist({ items }: { items: Item[] }) {
+export function PromoChecklist({ eventId, items }: { eventId: string; items: Item[] }) {
   const [, start] = useTransition();
   const [opt, set] = useOptimistic(items, (s, u: { id: string; status: string }) => s.map((i) => (i.id === u.id ? { ...i, status: u.status } : i)));
   const done = opt.filter((i) => i.status === "done").length;
@@ -27,7 +28,7 @@ export function PromoChecklist({ items }: { items: Item[] }) {
           const Icon = ICON[i.channel] ?? StickyNote;
           const isDone = i.status === "done";
           return (
-            <motion.li key={i.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }}>
+            <motion.li key={i.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }} className="group/row flex items-center gap-1.5">
               <button
                 onClick={() =>
                   start(async () => {
@@ -49,11 +50,36 @@ export function PromoChecklist({ items }: { items: Item[] }) {
                 <span className={cn("flex-1 text-sm", isDone && "text-muted-foreground line-through")}>{i.title}</span>
                 <span className="text-xs text-muted-foreground">{i.channel} · {new Date(`${i.due_date}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}</span>
               </button>
+              <RecordEditor
+                trigger=""
+                title="Edit checklist item"
+                className="size-9 shrink-0 justify-center border-transparent px-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                save={updatePromoItem.bind(null, i.id)}
+                remove={removePromoItem.bind(null, i.id)}
+                fields={[
+                  { key: "title", label: "What to do", value: i.title, wide: true },
+                  { key: "channel", label: "Channel", value: i.channel, placeholder: "Instagram, LinkedIn, Email, Poster, WhatsApp" },
+                  { key: "due_date", label: "Due", value: String(i.due_date).slice(0, 10), type: "date" },
+                  { key: "link", label: "Link once posted", value: i.link, type: "url", wide: true },
+                ]}
+              />
             </motion.li>
           );
         })}
       </ul>
-      {opt.length === 0 && <p className="text-sm text-muted-foreground">No promotion plan yet, run the agent.</p>}
+      {opt.length === 0 && <p className="text-sm text-muted-foreground">No promotion plan yet. Run the agent or add your own.</p>}
+      <RecordEditor
+        trigger="Add item"
+        icon={<Plus className="size-3.5 transition-transform group-hover/edit:rotate-90" />}
+        className="mt-3"
+        title="Add to the checklist"
+        save={addPromoItem.bind(null, eventId)}
+        fields={[
+          { key: "title", label: "What to do", value: "", wide: true, placeholder: "Speaker spotlight post" },
+          { key: "channel", label: "Channel", value: "Instagram", placeholder: "Instagram, LinkedIn, Email, Poster, WhatsApp" },
+          { key: "due_date", label: "Due", value: "", type: "date" },
+        ]}
+      />
     </div>
   );
 }

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, Minus, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { addMitigationTask, createRisk, updateRisk } from "@/app/actions";
+import { addMitigationTask, createRisk, deleteRisk, updateRisk } from "@/app/actions";
+import { RecordEditor } from "@/components/app/record-editor";
 import { fireConfetti } from "@/components/ep/kit";
 import { cn } from "@/lib/utils";
 import type { Risk } from "@/lib/types";
@@ -153,6 +154,19 @@ function RiskRow({ r, focus, setFocus, eventId }: { r: R; focus: boolean; setFoc
                     <option value="mitigating">Mitigating</option>
                     <option value="closed">Closed</option>
                   </select>
+                  <RecordEditor
+                    trigger="Edit text"
+                    title={`Edit risk: ${r.category}`}
+                    save={updateRisk.bind(null, r.id)}
+                    remove={deleteRisk.bind(null, r.id)}
+                    removeLabel="Remove risk"
+                    fields={[
+                      { key: "category", label: "Category", value: r.category, wide: true },
+                      { key: "description", label: "What could go wrong", value: r.description, type: "textarea" },
+                      { key: "mitigation", label: "How we prevent it", value: r.mitigation, type: "textarea" },
+                      { key: "contingency", label: "Plan B if it happens", value: r.contingency, type: "textarea" },
+                    ]}
+                  />
                 </motion.div>
               )}
             </div>

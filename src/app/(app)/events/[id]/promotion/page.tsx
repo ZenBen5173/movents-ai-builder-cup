@@ -47,7 +47,7 @@ export default async function PromotionPage({ params }: { params: Promise<{ id: 
         />
       </Card>
       <Card title="Promotion checklist" description="Instagram, LinkedIn, email and posters, dated back from the event. Posters only go up after SLE publicity approval.">
-        <PromoChecklist items={items} />
+        <PromoChecklist eventId={id} items={items} />
       </Card>
     </div>
   );

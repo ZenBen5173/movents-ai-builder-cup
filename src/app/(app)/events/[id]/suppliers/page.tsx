@@ -4,6 +4,8 @@ import { query } from "@/lib/db";
 import { fmtRM } from "@/lib/appurl";
 import { Card } from "@/components/app/ui";
 import { VendorRowActions } from "@/components/app/people-forms";
+import { RecordEditor } from "@/components/app/record-editor";
+import { editVendor } from "@/app/actions";
 import { cn } from "@/lib/utils";
 import { canViewEvent } from "@/lib/guard";
 
@@ -79,7 +81,22 @@ export default async function SuppliersPage({ params }: { params: Promise<{ id: 
                     </ol>
                   </td>
                   <td className="py-3 pr-4 text-right">
-                    <VendorRowActions vendor={v} eventId={id} checkoutUrl={payments.find((p) => p.vendor_id === v.id && p.status === "pending")?.checkout_url ?? null} />
+                    <span className="inline-flex flex-wrap items-center justify-end gap-1">
+                      <RecordEditor
+                        title={`Edit ${v.name.split(" — ")[0]}`}
+                        description="Put in the real quote once the supplier replies. The budget line follows it."
+                        save={editVendor.bind(null, v.id)}
+                        fields={[
+                          { key: "name", label: "Supplier", value: v.name, wide: true },
+                          { key: "quote", label: "Total quote (RM)", value: v.quote, type: "number" },
+                          { key: "unit_price", label: "Price per unit (RM)", value: v.unit_price, type: "number" },
+                          { key: "unit", label: "Unit", value: v.unit, placeholder: "pax, piece" },
+                          { key: "contact_email", label: "Contact email", value: v.contact_email, type: "email" },
+                          { key: "url", label: "Website", value: v.url, type: "url", wide: true },
+                        ]}
+                      />
+                      <VendorRowActions vendor={v} eventId={id} checkoutUrl={payments.find((p) => p.vendor_id === v.id && p.status === "pending")?.checkout_url ?? null} />
+                    </span>
                   </td>
                 </tr>
               );

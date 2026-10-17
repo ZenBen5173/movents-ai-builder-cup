@@ -31,7 +31,7 @@ export async function setEventMailbox(eventId: string, address: string, label?: 
 }
 
 /** Send or discard an email the AI drafted for you (optionally fixing the address or subject first). */
-export async function decideDraftAction(draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string } = {}): Promise<Res> {
+export async function decideDraftAction(draftId: string, decision: "send" | "discard", edits: { to?: string; subject?: string; body?: string } = {}): Promise<Res> {
   try {
     const user = await requireUser();
     const { decideDraft } = await import("@/lib/actions");

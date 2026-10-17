@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { one, query } from "@/lib/db";
 import { fmtDate, fmtRM, daysBetween, today } from "@/lib/appurl";
 import type { EventRow, Role, Venue } from "@/lib/types";
+import { EventDetailsEditor } from "@/components/app/event-details-editor";
 import { Pill } from "@/components/app/ui";
 import { EventTabs } from "@/components/app/event-tabs";
 import { listMembers } from "@/lib/members";
@@ -53,11 +54,14 @@ export default async function EventLayout({ children, params }: { children: Reac
         <p className="mono-label text-tomato">Project · {ev.topic ?? "event"}</p>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
           <h1 className="font-display text-3xl font-bold tracking-tight md:text-[40px] md:leading-[1.05]">{ev.title}</h1>
+          <div className="flex items-center gap-2">
+          <EventDetailsEditor eventId={id} ev={{ title: ev.title, topic: ev.topic, date: ev.date, start_time: ev.start_time, end_time: ev.end_time, pax: ev.pax, budget_cap: ev.budget_cap }} />
           <Link href={`/events/${id}/registration`} className="group flex h-11 items-center gap-2.5 rounded-xl border-[1.5px] border-ink bg-sun pl-3 pr-2 text-sm font-semibold shadow-[2px_2px_0_0_#161514] transition-all hover:-translate-y-0.5 hover:shadow-[3px_3px_0_0_#161514]">
             <ScanLine className="size-4 transition-transform group-hover:scale-110" />
             Check-in
             <span title="Checked in / going" className="rounded-md border border-ink bg-card px-1.5 py-0.5 font-mono text-[11px]">{guests.inn}/{guests.going}</span>
           </Link>
+          </div>
         </div>
         <dl className="mt-4 grid max-w-3xl grid-cols-[110px_1fr] gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[110px_1fr_110px_1fr]">
           {props.map(([k, v]) => (

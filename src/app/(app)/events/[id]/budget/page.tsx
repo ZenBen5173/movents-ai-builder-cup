@@ -33,7 +33,7 @@ export default async function BudgetPage({ params }: { params: Promise<{ id: str
         surface
         actions={
           <div className="flex gap-2">
-            <ActionButton action={rerunBudget.bind(null, id)} size="xs" icon={<RefreshCcw className="size-3.5" />} confirm="Recompose the budget from current supplier quotes? Actuals will be cleared.">Re-run</ActionButton>
+            <ActionButton action={rerunBudget.bind(null, id)} size="xs" icon={<RefreshCcw className="size-3.5" />} confirm="Re-draft the budget from current supplier quotes? Items you added or edited stay; the rest is rebuilt around them and their actuals are cleared.">Re-run</ActionButton>
             <a href={`/api/outputs/${id}/budget.xlsx`} className="inline-flex h-7 items-center gap-1.5 rounded-lg border-[1.5px] border-ink bg-[#46a758] px-2 text-xs font-medium text-white"><FileSpreadsheet className="size-3.5" />.xlsx</a>
             <a href={`/api/outputs/${id}/budget.csv`} className="inline-flex h-7 items-center rounded-lg border-[1.5px] border-ink/20 px-2 text-xs hover:border-ink">.csv</a>
           </div>

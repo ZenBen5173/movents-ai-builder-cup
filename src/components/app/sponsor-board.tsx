@@ -10,7 +10,8 @@ import { ActionButton } from "@/components/app/action-button";
 import { StageEmpty, fireConfetti } from "@/components/ep/kit";
 import { SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
-import { acceptSponsor, addSponsor, declineSponsor, findSponsorsAction, markSponsorReplied, sendSponsorEmail } from "@/app/actions-sponsors";
+import { acceptSponsor, addSponsor, declineSponsor, findSponsorsAction, markSponsorReplied, removeSponsor, sendSponsorEmail, updateSponsor } from "@/app/actions-sponsors";
+import { RecordEditor } from "@/components/app/record-editor";
 import type { SponsorStatus } from "@/lib/types";
 
 export type SponsorRow = {
@@ -328,6 +329,30 @@ function Row({ s, onEmail, accepting, onAccept }: { s: SponsorRow; onEmail: () =
             {s.website && <ArrowUpRight className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover/name:opacity-100" />}
           </a>
           {s.industry && <span className="mono-label shrink-0 rounded-full border border-ink/25 bg-sand/60 px-2 py-0.5 text-[9.5px]">{s.industry}</span>}
+          <RecordEditor
+            trigger=""
+            title={`Edit ${s.company}`}
+            description="Fix the contact, what we are asking for, or the offer they made."
+            className="size-7 justify-center border-transparent px-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+            save={updateSponsor.bind(null, s.id)}
+            remove={removeSponsor.bind(null, s.id)}
+            removeLabel="Remove sponsor"
+            fields={[
+              { key: "company", label: "Company", value: s.company },
+              { key: "industry", label: "Industry", value: s.industry },
+              { key: "contact_name", label: "Contact name", value: s.contact_name },
+              { key: "contact_email", label: "Contact email", value: s.contact_email, type: "email" },
+              { key: "website", label: "Website", value: s.website, type: "url", wide: true },
+              { key: "ask", label: "Our ask", value: s.ask, wide: true, placeholder: "RM2,000 or food for 120 people" },
+              ...(s.status === "accepted"
+                ? [
+                    { key: "offer_amount", label: "Offer amount (RM)", value: s.offer_amount, type: "number" as const },
+                    { key: "offer_note", label: "Offer note", value: s.offer_note },
+                  ]
+                : []),
+              { key: "notes", label: "Notes", value: s.notes, type: "textarea" },
+            ]}
+          />
         </span>
         {(contact || s.fit_reason) && (
           <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 w-max max-w-80 translate-y-1 rounded-lg border-[1.5px] border-ink bg-card px-2.5 py-1.5 text-xs opacity-0 shadow-[2px_2px_0_0_#161514] transition-all delay-150 group-hover:translate-y-0 group-hover:opacity-100">

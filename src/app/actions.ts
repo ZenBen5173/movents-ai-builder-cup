@@ -223,11 +223,52 @@ export async function addBudgetLine(eventId: string, input: { category: string; 
   }, ["/events"]);
 }
 
+/** Change a budget line's item, quantity or price. An edited line is kept when the budget is re-drafted. */
+function plannedKey(description: string, category: string) {
+  const d = description.toLowerCase();
+  if (category === "Food & beverage") return "food";
+  if (category === "Venue") return "venue";
+  if (category === "Speakers") return "speaker";
+  if (category === "Publicity") return "printing";
+  return d.startsWith("crew t-shirt") ? "tshirt" : d.startsWith("lanyard") ? "lanyard" : d.startsWith("name-tag") ? "cardholder" : null;
+}
+
+export async function updateBudgetLine(lineId: string, patch: { description?: string; qty?: number; unit_cost?: number; category?: string }) {
+  return wrap(async () => {
+    const user = await onTeam("budget_lines", lineId);
+    const l = await one<{ event_id: string; description: string; qty: number; unit_cost: number; category: string; custom: boolean; line_key: string | null }>("SELECT event_id, description, qty, unit_cost, category, custom, line_key FROM budget_lines WHERE id = $1", [lineId]);
+    if (!l) throw new Error("Budget line not found");
+    const description = patch.description != null ? str(patch.description, 160).trim() : l.description;
+    const qty = patch.qty != null ? Math.round(Number(patch.qty)) : Number(l.qty);
+    const unit = patch.unit_cost != null ? Math.round(Number(patch.unit_cost) * 100) / 100 : Number(l.unit_cost);
+    if (!description) throw new Error("Say what the item is");
+    if (!(qty >= 0 && qty <= 100_000)) throw new Error("Enter a quantity");
+    if (!(unit >= 0 && unit <= 1_000_000)) throw new Error("Enter a price in RM");
+    const category = patch.category && LINE_CATEGORIES.includes(patch.category) ? patch.category : l.category;
+    // Lines planned before line keys existed: work out which planned item this is, so a re-draft does not add it twice.
+    const line_key = l.line_key ?? (l.custom ? null : plannedKey(l.description, l.category));
+    await update("budget_lines", lineId, { description, qty, unit_cost: unit, estimated: Math.round(qty * unit * 100) / 100, category, custom: true, line_key });
+    await audit(user, "budget.line_edited", { before: { description: l.description, qty: l.qty, unit_cost: l.unit_cost }, after: { description, qty, unit_cost: unit } }, { eventId: l.event_id });
+  }, ["/events"]);
+}
+
+/** Change an event's basics (title, topic, date, times, headcount, budget cap). */
+export async function updateEventBasics(eventId: string, patch: T.EventPatch) {
+  return wrap(async () => {
+    const user = await onEvent(eventId);
+    const r = await T.updateEventDetails(user, eventId, patch);
+    if (!r.changed) return "Nothing to update";
+    const moved = r.changes.some((c) => c.field === "date");
+    if (moved) await T.checkLeads(eventId);
+    return moved ? "Saved. The date moved: re-plan the timeline from Tasks if the deadlines should move too." : "Saved";
+  }, ["/events", "/"]);
+}
+
 export async function removeBudgetLine(lineId: string) {
   return wrap(async () => {
     const user = await onTeam("budget_lines", lineId);
     const l = await one<{ event_id: string; description: string; custom: boolean }>("SELECT event_id, description, custom FROM budget_lines WHERE id = $1", [lineId]);
-    if (!l?.custom) throw new Error("Only items you added can be removed; re-run the budget to change the rest");
+    if (!l) throw new Error("Budget line not found");
     await query("DELETE FROM budget_lines WHERE id = $1", [lineId]);
     await audit(user, "budget.line_removed", { description: l.description }, { eventId: l.event_id });
   }, ["/events"]);
@@ -244,6 +285,44 @@ export async function rerunBudget(eventId: string) {
 }
 
 // ------------------------------------------------------------------ speakers & vendors
+
+/** Edit a speaker's details (anything Gemini found can be corrected by hand). */
+export async function updateSpeaker(speakerId: string, data: { name?: string; headline?: string; email?: string; phone?: string; talk_title?: string; bio?: string; photo_url?: string; source_url?: string }) {
+  return wrap(async () => {
+    const user = await onTeam("speakers", speakerId);
+    const patch: Record<string, unknown> = {};
+    if (data.name !== undefined) {
+      const name = str(data.name, 120).trim();
+      if (!name) throw new Error("A speaker needs a name");
+      patch.name = name;
+    }
+    if (data.headline !== undefined) patch.headline = str(data.headline, 300).trim() || null;
+    if (data.email !== undefined) {
+      const e = str(data.email, 254).trim();
+      if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error("That is not an email address");
+      patch.email = e || null;
+    }
+    if (data.phone !== undefined) patch.phone = str(data.phone, 40).trim() || null;
+    if (data.talk_title !== undefined) patch.talk_title = str(data.talk_title, 200).trim() || null;
+    if (data.bio !== undefined) patch.bio = str(data.bio, 2000).trim() || null;
+    if (data.photo_url !== undefined) patch.photo_url = /^https:\/\//i.test(data.photo_url.trim()) ? data.photo_url.trim().slice(0, 1000) : null;
+    if (data.source_url !== undefined) patch.source_url = safeUrl(data.source_url);
+    const sp = await update<{ event_id: string; name: string }>("speakers", speakerId, patch);
+    if (sp) await audit(user, "speaker.edited", { speaker: sp.name, fields: Object.keys(patch) }, { eventId: sp.event_id });
+    return "Saved";
+  }, ["/events"]);
+}
+
+export async function removeSpeaker(speakerId: string) {
+  return wrap(async () => {
+    const user = await onTeam("speakers", speakerId);
+    const sp = await one<{ event_id: string; name: string }>("SELECT event_id, name FROM speakers WHERE id = $1", [speakerId]);
+    if (!sp) throw new Error("Speaker not found");
+    await query("DELETE FROM speakers WHERE id = $1", [speakerId]);
+    await audit(user, "speaker.removed", { speaker: sp.name }, { eventId: sp.event_id });
+    return `Removed ${sp.name}`;
+  }, ["/events"]);
+}
 
 export async function speakerAction(speakerId: string, action: "outreach" | "replied" | "confirm" | "declined") {
   return wrap(async () => {
@@ -310,6 +389,46 @@ export async function vendorUpdate(vendorId: string, data: Partial<Pick<Vendor, 
     if (patch.contract_status && !["none", "requested", "sent", "signed", "cancelled"].includes(String(patch.contract_status))) throw new Error("Unknown contract status");
     const v = await update<Vendor>("vendors", vendorId, patch);
     await audit(user, "vendor.updated", { vendor: v?.name, ...patch }, { eventId: v?.event_id });
+  }, ["/vendors", "/events"]);
+}
+
+/** Edit a supplier by hand (name, contact, quote). A new quote on the chosen supplier reprices its budget line. */
+export async function editVendor(vendorId: string, data: Record<string, string>) {
+  return wrap(async () => {
+    const { user } = await canEditVendor(vendorId);
+    const before = await one<Vendor>("SELECT * FROM vendors WHERE id = $1", [vendorId]);
+    if (!before) throw new Error("Supplier not found");
+    const patch: Record<string, unknown> = {};
+    if (data.name !== undefined) {
+      patch.name = str(data.name, 160);
+      if (!patch.name) throw new Error("Supplier name is required");
+    }
+    if (data.contact_email !== undefined) {
+      const e = str(data.contact_email, 254);
+      if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error("That is not an email address");
+      patch.contact_email = e || null;
+    }
+    if (data.url !== undefined) patch.url = safeUrl(data.url);
+    if (data.unit !== undefined) patch.unit = str(data.unit, 20) || "unit";
+    for (const k of ["quote", "unit_price"] as const) {
+      if (data[k] === undefined) continue;
+      const raw = str(data[k]).replace(/[^\d.]/g, "");
+      const n = raw ? Number(raw) : null;
+      if (n !== null && !Number.isFinite(n)) throw new Error(`${k === "quote" ? "Quote" : "Unit price"} must be a number`);
+      patch[k] = n;
+    }
+    if (!Object.keys(patch).length) return "Nothing changed";
+    const v = await update<Vendor>("vendors", vendorId, patch);
+    // Keep the budget in step with the supplier's real quote.
+    if (v?.event_id && v.selected && patch.quote != null && patch.quote !== before.quote) {
+      const line = await one<{ id: string; qty: number; description: string; category: string; custom: boolean; line_key: string | null }>("SELECT id, qty, description, category, custom, line_key FROM budget_lines WHERE event_id = $1 AND vendor_id = $2", [v.event_id, v.id]);
+      if (line) {
+        const line_key = line.line_key ?? (line.custom ? null : plannedKey(line.description, line.category));
+        await update("budget_lines", line.id, { estimated: patch.quote, unit_cost: Math.round((Number(patch.quote) / Math.max(1, line.qty)) * 100) / 100, custom: true, line_key });
+      }
+    }
+    await audit(user, "vendor.updated", { vendor: v?.name, ...patch }, { eventId: v?.event_id });
+    return `${(v?.name ?? "Supplier").split(" — ")[0]} updated`;
   }, ["/vendors", "/events"]);
 }
 
@@ -437,6 +556,55 @@ export async function promoteWaitlist(eventId: string) {
     for (const r of rows) await update("rsvps", r.id, { status: "going" });
     await audit(user, "rsvp.waitlist_promoted", { count: rows.length }, { eventId });
     return `Promoted ${rows.length} from waitlist (${free} seats were free)`;
+  }, ["/events"]);
+}
+
+const PROMO_CHANNELS = ["Instagram", "LinkedIn", "Email", "Poster", "WhatsApp"];
+const isoDate = (v: unknown) => {
+  const d = str(v, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) throw new Error("Pick a date");
+  return d;
+};
+
+export async function addPromoItem(eventId: string, data: Record<string, string>) {
+  return wrap(async () => {
+    const user = await onEvent(eventId);
+    const title = str(data.title, 200);
+    if (!title) throw new Error("What needs doing?");
+    const channel = PROMO_CHANNELS.find((c) => c.toLowerCase() === str(data.channel).toLowerCase()) ?? (str(data.channel, 30) || "Instagram");
+    const ev = await one<{ date: string }>("SELECT date FROM events WHERE id = $1", [eventId]);
+    const due = data.due_date ? isoDate(data.due_date) : String(ev?.date ?? new Date().toISOString()).slice(0, 10);
+    await insert("promo_items", { id: id("pro"), event_id: eventId, channel, title, due_date: due, status: "todo" });
+    await audit(user, "promo.added", { title, channel }, { eventId });
+    return "Added to the checklist";
+  }, ["/events"]);
+}
+
+export async function updatePromoItem(itemId: string, data: Record<string, string>) {
+  return wrap(async () => {
+    const user = await onTeam("promo_items", itemId);
+    const patch: Record<string, unknown> = {};
+    if (data.title !== undefined) {
+      patch.title = str(data.title, 200);
+      if (!patch.title) throw new Error("What needs doing?");
+    }
+    if (data.channel !== undefined) patch.channel = PROMO_CHANNELS.find((c) => c.toLowerCase() === str(data.channel).toLowerCase()) ?? (str(data.channel, 30) || "Instagram");
+    if (data.due_date !== undefined) patch.due_date = isoDate(data.due_date);
+    if (data.link !== undefined) patch.link = safeUrl(data.link);
+    if (!Object.keys(patch).length) return "Nothing changed";
+    const r = await update<{ event_id: string; title: string }>("promo_items", itemId, patch);
+    await audit(user, "promo.updated", { title: r?.title, ...patch }, { eventId: r?.event_id });
+    return "Saved";
+  }, ["/events"]);
+}
+
+export async function removePromoItem(itemId: string) {
+  return wrap(async () => {
+    const user = await onTeam("promo_items", itemId);
+    const r = await one<{ event_id: string; title: string }>("SELECT event_id, title FROM promo_items WHERE id = $1", [itemId]);
+    await query("DELETE FROM promo_items WHERE id = $1", [itemId]);
+    await audit(user, "promo.removed", { title: r?.title }, { eventId: r?.event_id });
+    return "Removed";
   }, ["/events"]);
 }
 
@@ -720,12 +888,14 @@ export async function deleteTask(taskId: string) {
   }, ["/events"]);
 }
 
-export async function updateRisk(riskId: string, patch: Partial<{ status: string; likelihood: number; impact: number; mitigation: string; contingency: string; owner_id: string | null; description: string }>) {
+export async function updateRisk(riskId: string, patch: Partial<{ status: string; likelihood: number; impact: number; mitigation: string; contingency: string; owner_id: string | null; description: string; category: string }>) {
   return wrap(async () => {
     const user = await onTeam("risks", riskId);
-    patch = pick(patch ?? {}, ["status", "likelihood", "impact", "mitigation", "contingency", "owner_id", "description"] as const);
+    patch = pick(patch ?? {}, ["status", "likelihood", "impact", "mitigation", "contingency", "owner_id", "description", "category"] as const);
     for (const k of ["likelihood", "impact"] as const) if (patch[k] !== undefined && !(Number(patch[k]) >= 1 && Number(patch[k]) <= 5)) throw new Error(`${k} must be 1 to 5`);
     for (const k of ["mitigation", "contingency", "description"] as const) if (patch[k] !== undefined) patch[k] = str(patch[k], 5000);
+    if (patch.category !== undefined) patch.category = str(patch.category, 60) || "General";
+    if (patch.description === "") throw new Error("Describe the risk");
     if (patch.owner_id && !(await one("SELECT 1 FROM memberships WHERE user_id = $1 AND society_id = $2", [patch.owner_id, user.society_id]))) throw new Error("Owner must be a member of the society");
     const r = await update<{ event_id: string; category: string }>("risks", riskId, patch);
     await audit(user, "risk.updated", { risk: r?.category, ...patch }, { eventId: r?.event_id });
@@ -741,6 +911,18 @@ export async function createRisk(eventId: string, data: { category: string; desc
     await insert("risks", { id: id("rsk"), event_id: eventId, category: str(data.category, 60) || "General", description, likelihood: clamp(data.likelihood), impact: clamp(data.impact), mitigation: str(data.mitigation, 5000) || "TBD", contingency: null, owner_id: user.id, status: "open" });
     await audit(user, "risk.created", { risk: data.description }, { eventId });
     return "Risk added";
+  }, ["/events"]);
+}
+
+export async function deleteRisk(riskId: string) {
+  return wrap(async () => {
+    const user = await onTeam("risks", riskId);
+    const r = await one<{ event_id: string; category: string }>("SELECT event_id, category FROM risks WHERE id = $1", [riskId]);
+    if (!r) throw new Error("Risk not found");
+    await query("UPDATE tasks SET risk_id = NULL WHERE risk_id = $1", [riskId]);
+    await query("DELETE FROM risks WHERE id = $1", [riskId]);
+    await audit(user, "risk.deleted", { risk: r.category }, { eventId: r.event_id });
+    return "Risk removed";
   }, ["/events"]);
 }
 
@@ -775,6 +957,57 @@ export async function deleteVendors(ids: string[]) {
     await audit(user, "vendor.removed", { count: gone.length });
     return `Removed ${gone.length} vendor(s)`;
   }, ["/universities"]);
+}
+
+const ATTENDEE_FIELDS = ["name", "email", "dietary", "accessibility"] as const;
+function attendeePatch(data: Record<string, unknown>) {
+  const patch: Record<string, string | null> = {};
+  for (const k of ATTENDEE_FIELDS) {
+    if (data[k] === undefined) continue;
+    const v = str(data[k], k === "email" ? 254 : k === "name" ? 120 : 300);
+    if (k === "name" && !v) throw new Error("Name is required");
+    if (k === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error("That is not an email address");
+    patch[k] = k === "email" ? v.toLowerCase() : v || null;
+  }
+  return patch;
+}
+
+/** Add someone to the guest list by hand (walk-ins, VIPs, people who emailed you). */
+export async function addAttendee(eventId: string, data: Record<string, string>) {
+  return wrap(async () => {
+    const user = await onEvent(eventId);
+    const patch = attendeePatch({ name: data.name ?? "", email: data.email ?? "", dietary: data.dietary, accessibility: data.accessibility });
+    if (await one("SELECT 1 FROM rsvps WHERE event_id = $1 AND lower(email) = $2", [eventId, patch.email])) throw new Error("That email is already on the list");
+    await insert("rsvps", { id: id("rsv"), event_id: eventId, source: "direct", status: "going", ticket: T.ticketCode(), dietary: null, accessibility: null, ...patch });
+    await audit(user, "rsvp.added", { name: patch.name }, { eventId });
+    return `${patch.name} added`;
+  }, ["/events"]);
+}
+
+export async function updateAttendee(rsvpId: string, data: Record<string, unknown>) {
+  return wrap(async () => {
+    const user = await onTeam("rsvps", rsvpId);
+    const patch = attendeePatch(data);
+    if (!Object.keys(patch).length) return "Nothing changed";
+    const r = await update<Rsvp>("rsvps", rsvpId, patch);
+    await audit(user, "rsvp.updated", { name: r?.name, fields: Object.keys(patch) }, { eventId: r?.event_id });
+    return "Saved";
+  }, ["/events"]);
+}
+
+/** Proposal wording (overview, objectives, outcomes, audience) by hand. Objectives are one per line. */
+export async function updateProposalText(eventId: string, data: Record<string, string>) {
+  return wrap(async () => {
+    const user = await onEvent(eventId);
+    const ev = await one<{ preferences: Record<string, unknown> | null }>("SELECT preferences FROM events WHERE id = $1", [eventId]);
+    const prev = ((ev?.preferences ?? {}).proposal ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...prev };
+    for (const k of ["overview", "outcomes", "audience"] as const) if (data[k] !== undefined) next[k] = str(data[k], k === "overview" ? 1500 : 800) || undefined;
+    if (data.objectives !== undefined) next.objectives = data.objectives.split("\n").map((l) => l.replace(/^[\s\-*•\d.)]+/, "").trim().slice(0, 300)).filter(Boolean).slice(0, 8);
+    await update("events", eventId, { preferences: { ...(ev?.preferences ?? {}), proposal: next } });
+    await audit(user, "proposal.edited", { fields: Object.keys(data) }, { eventId });
+    return "Proposal wording saved. The PDF and Word files use it now.";
+  }, ["/events"]);
 }
 
 export async function setRsvpStatus(rsvpId: string, status: string) {

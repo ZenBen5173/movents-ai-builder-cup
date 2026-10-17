@@ -1,11 +1,12 @@
 import { ArrowUpRight, Mail, Phone, Search, ThumbsDown, UserCheck } from "lucide-react";
+import { RecordEditor } from "@/components/app/record-editor";
 import { loadBundle } from "@/lib/docs/builders";
 import { Card } from "@/components/app/ui";
 import { ActionButton } from "@/components/app/action-button";
 import { AddSpeakerForm } from "@/components/app/people-forms";
 import { Pass, Stamp } from "@/components/ep/kit";
 import { DocModal } from "@/components/app/doc-modal";
-import { findMoreSpeakers, speakerAction } from "@/app/actions";
+import { findMoreSpeakers, removeSpeaker, speakerAction, updateSpeaker } from "@/app/actions";
 import type { Speaker } from "@/lib/types";
 import { canViewEvent } from "@/lib/guard";
 
@@ -63,6 +64,23 @@ export default async function SpeakersPage({ params }: { params: Promise<{ id: s
               {s.status === "confirmed" && <Stamp tone="green" className="absolute -right-2 -top-1 rotate-12 text-[11px]">Booked</Stamp>}
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <DocModal href={`/api/outputs/${id}/speaker-${s.id}.pdf`} title={s.name} className="inline-flex h-7 items-center rounded-lg border border-ink/20 px-2 text-xs transition-colors hover:border-ink">Profile</DocModal>
+                <RecordEditor
+                  title={`Edit ${s.name}`}
+                  description="Correct anything Gemini found, or fill in what it could not (email, talk title, bio)."
+                  save={updateSpeaker.bind(null, s.id)}
+                  remove={removeSpeaker.bind(null, s.id)}
+                  removeLabel="Remove speaker"
+                  fields={[
+                    { key: "name", label: "Name", value: s.name, wide: true },
+                    { key: "headline", label: "Role and organisation", value: s.headline, wide: true },
+                    { key: "email", label: "Email", value: s.email, type: "email" },
+                    { key: "phone", label: "Phone", value: s.phone },
+                    { key: "talk_title", label: "Talk title", value: s.talk_title, wide: true },
+                    { key: "bio", label: "Bio", value: s.bio, type: "textarea" },
+                    { key: "photo_url", label: "Photo link (https)", value: s.photo_url, type: "url" },
+                    { key: "source_url", label: "Profile link", value: s.source_url, type: "url" },
+                  ]}
+                />
                 {s.source_url && s.source !== "sample" && (
                   <a
                     href={s.source_url}

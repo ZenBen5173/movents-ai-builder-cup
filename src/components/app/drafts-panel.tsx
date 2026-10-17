@@ -41,6 +41,8 @@ export function DraftsPanel({ drafts }: { drafts: Draft[] }) {
 
 function DraftRow({ d, index, onDone }: { d: Draft; index: number; onDone: () => void }) {
   const [to, setTo] = useState(d.to);
+  const [subject, setSubject] = useState(d.subject);
+  const [body, setBody] = useState(d.text);
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [which, setWhich] = useState<"send" | "discard" | null>(null);
@@ -49,7 +51,7 @@ function DraftRow({ d, index, onDone }: { d: Draft; index: number; onDone: () =>
   function act(decision: "send" | "discard") {
     setWhich(decision);
     start(async () => {
-      const r = await decideDraftAction(d.id, decision, { to });
+      const r = await decideDraftAction(d.id, decision, { to, ...(subject !== d.subject ? { subject } : {}), ...(body !== d.text ? { body } : {}) });
       if (!r.ok) toast.error(r.error);
       else {
         toast.success(r.message ?? "Done");
@@ -113,7 +115,24 @@ function DraftRow({ d, index, onDone }: { d: Draft; index: number; onDone: () =>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-            <p className="mt-3 whitespace-pre-line border-t border-dashed border-ink/20 pt-3 text-[13px] leading-relaxed text-ink/80">{d.text}</p>
+            <div className="mt-3 space-y-2 border-t border-dashed border-ink/20 pt-3">
+              {d.subject && (
+                <input
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  aria-label="Subject"
+                  className="h-8 w-full rounded-lg border-[1.5px] border-ink/15 bg-background px-2 text-xs font-semibold outline-none transition-colors focus:border-ink"
+                />
+              )}
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                aria-label="Message"
+                rows={Math.min(14, Math.max(5, body.split("\n").length + 1))}
+                className="w-full resize-y rounded-lg border-[1.5px] border-ink/15 bg-background px-2 py-1.5 text-[13px] leading-relaxed text-ink/80 outline-none transition-colors focus:border-ink"
+              />
+              {(subject !== d.subject || body !== d.text) && <p className="text-[11px] text-muted-foreground">Your edits go out when you press Send.</p>}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

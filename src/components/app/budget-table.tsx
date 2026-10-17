@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ExternalLink, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import { addBudgetLine, removeBudgetLine, setActual, setFunding } from "@/app/actions";
+import { addBudgetLine, removeBudgetLine, setActual, setFunding, updateBudgetLine } from "@/app/actions";
 import { cn } from "@/lib/utils";
 import type { BudgetLine } from "@/lib/types";
 
@@ -41,6 +41,47 @@ function ActualCell({ line }: { line: BudgetLine }) {
       />
       {pending && <Loader2 className="absolute -left-4 top-1.5 size-3.5 animate-spin text-muted-foreground" />}
     </div>
+  );
+}
+
+/** Click to edit in place; Enter or leaving the field saves, Esc cancels. */
+function Editable({ value, onSave, numeric, className, label }: { value: string; onSave: (v: string) => Promise<void>; numeric?: boolean; className?: string; label: string }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(value);
+  const [pending, start] = useTransition();
+  if (!editing)
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setV(value);
+          setEditing(true);
+        }}
+        title={`Edit ${label}`}
+        className={cn("rounded px-1 -mx-1 text-left decoration-tomato/60 decoration-dashed underline-offset-4 transition-colors hover:bg-tomato/10 hover:underline", pending && "opacity-50", className)}
+      >
+        {value || <span className="text-muted-foreground">add</span>}
+      </button>
+    );
+  const save = () => {
+    setEditing(false);
+    if (v.trim() === value.trim()) return;
+    start(() => onSave(v.trim()));
+  };
+  return (
+    <input
+      autoFocus
+      aria-label={label}
+      value={v}
+      inputMode={numeric ? "decimal" : undefined}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") save();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      className={cn("h-7 rounded-md border border-ink/30 bg-card px-1.5 outline-none focus:border-ink", numeric ? "w-20 text-right tabular" : "w-full", className)}
+    />
   );
 }
 
@@ -119,14 +160,19 @@ export function BudgetTable({ eventId, lines, totals }: { eventId: string; lines
         <tbody>
           {lines.map((l, i) => {
             const variance = l.actual != null ? l.actual - l.estimated : null;
+            const saveLine = async (patch: Parameters<typeof updateBudgetLine>[1]) => {
+              const r = await updateBudgetLine(l.id, patch);
+              if (!r.ok) toast.error(r.error);
+              router.refresh();
+            };
             return (
               <motion.tr key={l.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }} className="group border-b border-border/60 hover:bg-accent/40">
                 <td className="py-2 pr-3">
                   <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{l.category}</div>
                   <div className="flex items-center gap-1.5">
-                    {l.description}
-                    {l.custom && <span className="rounded bg-ink/5 px-1 text-[10px] text-muted-foreground">added by you</span>}
-                    {l.custom && (
+                    <Editable label="item" value={l.description} onSave={(v) => saveLine({ description: v })} />
+                    {l.custom && <span className="shrink-0 rounded bg-ink/5 px-1 text-[10px] text-muted-foreground">{l.line_key ? "edited by you" : "added by you"}</span>}
+                    {(
                       <button
                         type="button"
                         title="Remove this item"
@@ -148,8 +194,8 @@ export function BudgetTable({ eventId, lines, totals }: { eventId: string; lines
                     )}
                   </div>
                 </td>
-                <td className="py-2 pr-3 text-right tabular">{l.qty}</td>
-                <td className="py-2 pr-3 text-right tabular">{rm(l.unit_cost)}</td>
+                <td className="py-2 pr-3 text-right tabular"><Editable numeric label="quantity" value={String(l.qty)} onSave={(v) => saveLine({ qty: Number(v) })} /></td>
+                <td className="py-2 pr-3 text-right tabular"><Editable numeric label="unit price" value={rm(l.unit_cost)} onSave={(v) => saveLine({ unit_cost: Number(v.replace(/,/g, "")) })} /></td>
                 <td className="py-2 pr-3 text-right tabular">{rm(l.estimated)}</td>
                 <td className="py-2 pr-3 text-right"><div className="flex justify-end"><ActualCell line={l} /></div></td>
                 <td className={cn("py-2 pr-3 text-right tabular", variance != null && variance > 0 && "text-[var(--red-11)]", variance != null && variance < 0 && "text-[var(--grass-11)]")}>{variance == null ? "" : `${variance > 0 ? "+" : ""}${rm(variance)}`}</td>

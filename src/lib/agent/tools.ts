@@ -317,7 +317,8 @@ export async function draftBudget(eventId: string, signals: LessonSignals) {
   const vendors = await query<Vendor>("SELECT * FROM vendors WHERE event_id = $1 AND unit_price IS NOT NULL", [eventId]);
   const speakers = await query<Speaker>("SELECT * FROM speakers WHERE event_id = $1", [eventId]);
   // Items the committee added by hand stay; the rest of the budget fits in what is left of the cap.
-  const custom = await query<{ estimated: number }>("SELECT estimated FROM budget_lines WHERE event_id = $1 AND custom = true", [eventId]);
+  const custom = await query<{ estimated: number; line_key: string | null }>("SELECT estimated, line_key FROM budget_lines WHERE event_id = $1 AND custom = true", [eventId]);
+  const kept = new Set(custom.map((c) => c.line_key).filter(Boolean));
   const customTotal = custom.reduce((n, l) => n + Number(l.estimated), 0) * (1 + sop.budget_rules.contingency_pct / 100);
   const suppliers: Record<string, Supplier[]> = {};
   for (const v of vendors) (suppliers[v.category] ??= []).push({ id: v.id, category: v.category, name: v.name, url: v.url, unit_price: v.unit_price!, rating: v.rating, unit: v.unit ?? "unit" });
@@ -341,9 +342,11 @@ export async function draftBudget(eventId: string, signals: LessonSignals) {
   await query("UPDATE vendors SET selected = false WHERE event_id = $1", [eventId]);
   let sort = 0;
   for (const l of result.final.lines) {
+    if (kept.has(l.key)) continue; // The committee edited this item; their version stays.
     await insert("budget_lines", {
       id: id("bl"),
       event_id: eventId,
+      line_key: l.key,
       category: l.category,
       description: l.description,
       vendor_id: l.supplier?.id ?? null,

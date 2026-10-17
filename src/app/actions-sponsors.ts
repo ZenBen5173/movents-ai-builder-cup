@@ -2,7 +2,7 @@
 
 import { publicError } from "@/lib/errors";
 import { revalidatePath } from "next/cache";
-import { one } from "@/lib/db";
+import { one, query } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { assertMember, assertMemberOf } from "@/lib/members";
 import { audit } from "@/lib/audit";
@@ -71,7 +71,7 @@ export async function sendSponsorEmail(sponsorId: string, draft: { to: string; s
     const r = await sendSponsorOutreach(user, sp, draft);
     refresh(sp.event_id);
     if (r.status === "failed") return { ok: false, error: r.error };
-    return { ok: true, message: r.status === "blocked" ? "Sent for Director approval" : `Sent to ${sp.company}` };
+    return { ok: true, message: r.status === "blocked" ? "Sent for sign-off" : `Sent to ${sp.company}` };
   } catch (err) {
     return fail(err);
   }
@@ -108,6 +108,53 @@ export async function declineSponsor(sponsorId: string): Promise<Res> {
     await audit(user, "sponsor.declined", { company: sp.company }, { eventId: sp.event_id });
     refresh(sp.event_id);
     return { ok: true, message: `${sp.company} declined` };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const SPONSOR_FIELDS = ["company", "industry", "website", "contact_name", "contact_email", "ask", "notes", "offer_note"] as const;
+export type SponsorPatch = Partial<Record<(typeof SPONSOR_FIELDS)[number], string>> & { offer_amount?: number | string | null };
+
+/** Fix anything on a sponsor by hand: contact, ask, notes, the offer. */
+export async function updateSponsor(sponsorId: string, patch: SponsorPatch): Promise<Res> {
+  try {
+    const { user, sp } = await load(sponsorId);
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const k of SPONSOR_FIELDS) {
+      if (patch[k] === undefined) continue;
+      let v: string | null = String(patch[k]).trim() || null;
+      if (k === "company" && !v) throw new Error("Company is required");
+      if (k === "contact_email" && v && !EMAIL_RE.test(v)) throw new Error("That is not an email address");
+      if (k === "website" && v && !/^https?:\/\//.test(v)) v = `https://${v}`;
+      vals.push(v);
+      sets.push(`${k} = $${vals.length}`);
+    }
+    if (patch.offer_amount !== undefined) {
+      const n = patch.offer_amount === null || patch.offer_amount === "" ? null : Number(String(patch.offer_amount).replace(/[^\d.]/g, ""));
+      if (n !== null && (!Number.isFinite(n) || n < 0)) throw new Error("Amount must be a number");
+      vals.push(n);
+      sets.push(`offer_amount = $${vals.length}`);
+    }
+    if (!sets.length) return { ok: true, message: "Nothing changed" };
+    vals.push(sponsorId);
+    await query(`UPDATE sponsors SET ${sets.join(", ")} WHERE id = $${vals.length}`, vals);
+    await audit(user, "sponsor.updated", { company: patch.company ?? sp.company, fields: Object.keys(patch) }, { eventId: sp.event_id });
+    refresh(sp.event_id);
+    return { ok: true, message: `${patch.company ?? sp.company} updated` };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function removeSponsor(sponsorId: string): Promise<Res> {
+  try {
+    const { user, sp } = await load(sponsorId);
+    await query("DELETE FROM sponsors WHERE id = $1", [sponsorId]);
+    await audit(user, "sponsor.removed", { company: sp.company }, { eventId: sp.event_id });
+    refresh(sp.event_id);
+    return { ok: true, message: `${sp.company} removed` };
   } catch (err) {
     return fail(err);
   }

@@ -1,4 +1,5 @@
 import "server-only";
+import { FIELDS_SCHEMA, RECORD_KINDS, addRecord, editRecord, listRecords, removeRecord } from "./edits";
 import { Run } from "./run";
 import * as T from "./tools";
 import { execute, classify } from "./pipelines";
@@ -442,6 +443,30 @@ const ALL_TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ...ev, risks: { type: "array", items: { type: "object", properties: { category: str("e.g. Speaker, AV / Tech, Food, Crowd, Safety"), description: str("What could go wrong"), likelihood: { type: "number", description: "1 to 5" }, impact: { type: "number", description: "1 to 5" }, mitigation: str("What we do to prevent it"), contingency: str("What we do if it happens") }, required: ["category", "description", "likelihood", "impact", "mitigation"] } }, ...runId }, required: ["event_id", "risks"] },
     run: (a, u) => traced(u, a, "Add event-specific risks", "add_risks", () => T.addRisks(String(a.event_id), (a.risks as T.RiskInput[]) ?? [])),
   },
+  {
+    name: "list_records",
+    description: "List one kind of item on the event with its id and editable fields, before edit_record or remove_record. kind: budget_line, speaker, sponsor, supplier, risk, promo_item, attendee or task.",
+    inputSchema: { type: "object", properties: { ...ev, kind: { type: "string", enum: [...RECORD_KINDS] } }, required: ["event_id", "kind"] },
+    run: async (a) => listRecords(String(a.event_id), a.kind),
+  },
+  {
+    name: "edit_record",
+    description: "Change one item on the event by id (from list_records). Pass only the fields that change, e.g. budget_line {qty, unit_cost, description, category}, supplier {quote, unit_price, contact_email}, speaker {email, talk_title, bio}, sponsor {contact_email, ask, notes}, risk {description, mitigation, likelihood, impact, status}, promo_item {title, due_date}, attendee {name, email, dietary}, task {title, due_date, status}. Edited budget lines are kept when the budget is redrafted.",
+    inputSchema: { type: "object", properties: { ...ev, kind: { type: "string", enum: [...RECORD_KINDS] }, id: str("The item id from list_records"), fields: FIELDS_SCHEMA, ...runId }, required: ["event_id", "kind", "id", "fields"] },
+    run: (a, u) => traced(u, a, `Edit ${String(a.kind).replace("_", " ")}`, "edit_record", () => editRecord(String(a.event_id), a.kind, String(a.id), (a.fields as Record<string, unknown>) ?? {})),
+  },
+  {
+    name: "add_record",
+    description: "Add one item: budget_line {category, description, qty, unit_cost}, attendee {name, email, dietary}, promo_item {title, channel, due_date} or task {title, phase, due_date}. For speakers, sponsors and risks use save_speakers, save_sponsors and add_risks.",
+    inputSchema: { type: "object", properties: { ...ev, kind: { type: "string", enum: ["budget_line", "attendee", "promo_item", "task"] }, fields: FIELDS_SCHEMA, ...runId }, required: ["event_id", "kind", "fields"] },
+    run: (a, u) => traced(u, a, `Add ${String(a.kind).replace("_", " ")}`, "add_record", () => addRecord(String(a.event_id), a.kind, (a.fields as Record<string, unknown>) ?? {})),
+  },
+  {
+    name: "remove_record",
+    description: "Remove one item by id (from list_records): budget_line, speaker, sponsor, risk, promo_item or task. An attendee is marked cancelled instead.",
+    inputSchema: { type: "object", properties: { ...ev, kind: { type: "string", enum: [...RECORD_KINDS] }, id: str("The item id from list_records"), ...runId }, required: ["event_id", "kind", "id"] },
+    run: (a, u) => traced(u, a, `Remove ${String(a.kind).replace("_", " ")}`, "remove_record", () => removeRecord(String(a.event_id), a.kind, String(a.id))),
+  },
   { name: "get_outputs", description: "Links to every generated file for an event (proposal PDF/DOCX, budget XLSX/CSV, risk register, run sheet, timeline ICS, report).", inputSchema: { type: "object", properties: { ...ev }, required: ["event_id"] }, run: async (a) => outputs(String(a.event_id)) },
   { name: "get_event", description: "Summary of an event: status, venue, budget totals, speakers, approvals and flags.", inputSchema: { type: "object", properties: { ...ev }, required: ["event_id"] }, run: async (a) => { const b = await loadBundle(String(a.event_id)); if (!b) throw new Error("Event not found"); const approvals = await query("SELECT id, title, status, approver_role FROM approval_requests WHERE event_id = $1 ORDER BY created_at", [b.event.id]); return { event: b.event, venue: b.venue?.name, budget: budgetTotals(b.lines, b.university?.sop.budget_rules.contingency_pct ?? 10), speakers: b.speakers.map((s) => ({ name: s.name, status: s.status })), approvals, rsvps: b.rsvps.length }; } },
   { name: "send_speaker_outreach", description: "Send invitation emails to found speakers. Role-gated: committee members' emails are queued for Director approval.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Send speaker outreach", "send_speaker_outreach", () => T.outreachSpeakers(u, String(a.event_id), (a.run_id as string) ?? null)) },
@@ -551,7 +576,7 @@ export const TOOLS = ALL_TOOLS;
 
 const READ_ONLY = new Set([
   "review_brief", "list_society_members", "list_my_events", "list_event_emails", "list_sponsors", "list_meetings", "whoami", "read_sop",
-  "check_lead_times", "list_speakers_and_suppliers", "validate_budget", "validate_proposal", "get_outputs", "get_event", "list_creatives", "list_approvals",
+  "check_lead_times", "list_speakers_and_suppliers", "list_records", "validate_budget", "validate_proposal", "get_outputs", "get_event", "list_creatives", "list_approvals",
 ]);
 /** Tools that reach people or services outside Movents (email, Luma/Meetup, calendars). */
 const OPEN_WORLD = new Set([

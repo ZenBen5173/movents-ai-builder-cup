@@ -1,6 +1,6 @@
 import Link from "next/link";
 import QRCode from "qrcode";
-import { RefreshCw, Rocket, ArrowUpFromLine, QrCode, ScanLine } from "lucide-react";
+import { RefreshCw, Rocket, ArrowUpFromLine, QrCode, ScanLine, UserPlus } from "lucide-react";
 import { loadBundle } from "@/lib/docs/builders";
 import { query } from "@/lib/db";
 import { appUrl, fmtDate } from "@/lib/appurl";
@@ -9,7 +9,8 @@ import { lumaMode, meetupMode } from "@/lib/integrations/ticketing";
 import { Stat } from "@/components/app/ui";
 import { ActionButton } from "@/components/app/action-button";
 import { RsvpTable } from "@/components/app/rsvp-table";
-import { promoteWaitlist, publish, sync } from "@/app/actions";
+import { addAttendee, promoteWaitlist, publish, sync } from "@/app/actions";
+import { RecordEditor } from "@/components/app/record-editor";
 import { canViewEvent } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
@@ -94,6 +95,20 @@ export default async function RegistrationPage({ params }: { params: Promise<{ i
           {[...diet, ...access].map(([k, n]) => (
             <span key={k} className="rounded-md border border-ink/20 px-1.5 py-0.5 font-mono text-[10.5px]">{k} <b>{n}</b></span>
           ))}
+          <RecordEditor
+            trigger="Add attendee"
+            icon={<UserPlus className="size-3.5 transition-transform group-hover/edit:scale-110" />}
+            className="ml-auto"
+            title="Add an attendee"
+            description="For walk-ins, guests and anyone who signed up outside the form. They get a ticket code like everyone else."
+            save={addAttendee.bind(null, id)}
+            fields={[
+              { key: "name", label: "Name", value: "" },
+              { key: "email", label: "Email", value: "", type: "email" },
+              { key: "dietary", label: "Dietary needs", value: "", placeholder: "Vegetarian, halal..." },
+              { key: "accessibility", label: "Access needs", value: "", placeholder: "Wheelchair access..." },
+            ]}
+          />
         </div>
         <RsvpTable rows={b.rsvps.map((r) => ({ ...r, created_at: new Date(r.created_at).toISOString(), checked_in_at: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null }))} />
       </section>
