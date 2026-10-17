@@ -9,7 +9,7 @@ A team of Gemini agents that plans university society events for volunteer commi
 
 <p align="center">
   <a href="https://movents-743449161087.asia-southeast1.run.app"><b>Open the live app</b></a> ·
-  <a href="docs/Movents-Demo-Video.mp4"><b>Demo video (2:36)</b></a> ·
+  <a href="https://youtu.be/NzB2CxK5d08"><b>Demo video (2:36)</b></a> ·
   <a href="docs/Movents-Pitch-Deck.pdf"><b>Pitch deck (PDF)</b></a> ·
   <a href="#try-it-in-2-minutes"><b>Try it in 2 minutes</b></a> ·
   <a href="#architecture"><b>Architecture</b></a>
@@ -28,7 +28,7 @@ A team of Gemini agents that plans university society events for volunteer commi
 | **Live app** | https://movents-743449161087.asia-southeast1.run.app (Cloud Run, asia-southeast1). Click **Try the live demo**, no account needed |
 | **Code** | This repository, public, branch `main` |
 | **Pitch deck** | [docs/Movents-Pitch-Deck.pdf](docs/Movents-Pitch-Deck.pdf) |
-| **Demo video** | [docs/Movents-Demo-Video.mp4](docs/Movents-Demo-Video.mp4) (2:36, narrated, English subtitles). See [Demo video](#demo-video) |
+| **Demo video** | [YouTube](https://youtu.be/NzB2CxK5d08) (2:36, narrated, English subtitles), also as [docs/Movents-Demo-Video.mp4](docs/Movents-Demo-Video.mp4). See [Demo video](#demo-video) |
 | **Gen AI** | Gemini on Vertex AI, used inside the app (planner, six specialist agents, checker, Movi the editing helper) |
 | **QR code** | [docs/movents-qr.png](docs/movents-qr.png) opens the live app |
 
@@ -249,9 +249,9 @@ and size-capped uploads, and errors logged server-side without leaking internals
 
 ## Demo video
 
-[![Demo video: Gemini writing the budget during a live build](docs/screenshots/demo-video-poster.png)](docs/Movents-Demo-Video.mp4)
+[![Demo video: Gemini writing the budget during a live build](docs/screenshots/demo-video-poster.png)](https://youtu.be/NzB2CxK5d08)
 
-**[Watch the demo (2:36, MP4)](docs/Movents-Demo-Video.mp4).** Everything in it is recorded from the live app in one
+**[Watch the demo on YouTube (2:36)](https://youtu.be/NzB2CxK5d08)** or [download the MP4](docs/Movents-Demo-Video.mp4). Everything in it is recorded from the live app in one
 fresh demo sandbox, with one real Gemini run. Nothing is mocked; waiting is sped up and labelled on screen.
 
 1. **New event:** fill in the blanks, type it, or use the mic, then **Plan with Gemini**.
