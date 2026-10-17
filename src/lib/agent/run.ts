@@ -1,6 +1,7 @@
 import "server-only";
 import { id, insert, one, update } from "../db";
 import { isMember } from "../members";
+import { mirrorRun } from "../runstore";
 import type { AgentOutput, AgentRun, AgentStep, StepStatus, User } from "../types";
 
 export type StepResult = {
@@ -11,18 +12,36 @@ export type StepResult = {
   adapt?: string;
 };
 
-/** A recorded agent run. Every step is persisted as it happens so the UI can show it live. */
+/**
+ * A recorded agent run. Every step is persisted as it happens so the UI can show
+ * it live: in Postgres, and mirrored to Firestore, which the live views read.
+ */
 export class Run {
   steps: AgentStep[] = [];
   outputs: AgentOutput[] = [];
   eventId: string | null = null;
+  kind: AgentRun["kind"] = "custom";
+  source: AgentRun["source"] = "builtin";
+  status: AgentRun["status"] = "running";
+  summary: AgentRun["summary"] = null;
+  startedBy: string | null = null;
+  createdAt = new Date().toISOString();
+  finishedAt: string | null = null;
 
   constructor(public id: string, public user: User, public prompt: string) {}
 
   static async start(user: User, prompt: string, kind: AgentRun["kind"], source: AgentRun["source"] = "builtin") {
     const runId = id("run");
     await insert("agent_runs", { id: runId, prompt, kind, source, status: "running", steps: [], outputs: [], started_by: user.id });
-    return new Run(runId, user, prompt);
+    const r = new Run(runId, user, prompt);
+    Object.assign(r, { kind, source, startedBy: user.id });
+    r.mirror();
+    return r;
+  }
+
+  /** The live copy in Firestore (queued, never blocks or fails the run). */
+  private mirror() {
+    mirrorRun({ id: this.id, event_id: this.eventId, prompt: this.prompt, kind: this.kind, source: this.source, status: this.status, steps: this.steps, outputs: this.outputs, summary: this.summary, started_by: this.startedBy, created_at: this.createdAt, finished_at: this.finishedAt });
   }
 
   /** A run the user started, or one on an event they are on. Others read as missing. */
@@ -34,6 +53,15 @@ export class Run {
     r.steps = row.steps ?? [];
     r.outputs = row.outputs ?? [];
     r.eventId = row.event_id;
+    Object.assign(r, {
+      kind: row.kind,
+      source: row.source,
+      status: row.status,
+      summary: row.summary,
+      startedBy: row.started_by,
+      createdAt: new Date(row.created_at).toISOString(),
+      finishedAt: row.finished_at ? new Date(row.finished_at).toISOString() : null,
+    });
     return r;
   }
 
@@ -43,7 +71,11 @@ export class Run {
    * Writes go one at a time, each with the state as it is when it runs, so
    * agents working in parallel on this run never leave an older snapshot last.
    */
-  private save(extra: Record<string, unknown> = {}) {
+  private save(extra: { status?: AgentRun["status"]; summary?: AgentRun["summary"]; finished_at?: Date } = {}) {
+    if (extra.status) this.status = extra.status;
+    if (extra.summary !== undefined) this.summary = extra.summary;
+    if (extra.finished_at) this.finishedAt = extra.finished_at.toISOString();
+    this.mirror();
     const next = this.saving.catch(() => null).then(() => update("agent_runs", this.id, { steps: this.steps, outputs: this.outputs, event_id: this.eventId, ...extra }));
     this.saving = next;
     return next;

@@ -106,6 +106,9 @@ async function vertexToken() {
   return token.value;
 }
 
+/** A Google Cloud access token for this app (Cloud Run's service account, or gcloud locally). Firestore uses it too. */
+export const googleAccessToken = () => vertexToken();
+
 async function gcloudToken() {
   const { exec } = await import("node:child_process");
   return new Promise<string>((resolve, reject) =>

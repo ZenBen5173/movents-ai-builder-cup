@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { visibleSql } from "@/lib/members";
 import type { AgentStep } from "@/lib/types";
+import { readRuns } from "@/lib/runstore";
 
 export const dynamic = "force-dynamic";
 
@@ -38,5 +39,11 @@ export async function GET(req: Request) {
      ORDER BY r.created_at DESC LIMIT 6`,
     event ? [user.id, user.society_id, event] : [user.id, user.society_id],
   );
-  return NextResponse.json({ runs: rows.map(slim) }, { headers: { "cache-control": "no-store" } });
+  // Which runs come from Postgres (visibility rules); their live state, steps and status, from Firestore.
+  const live = await readRuns(rows.map((r) => r.id));
+  const merged = rows.map((r) => {
+    const f = live.get(r.id);
+    return f ? { ...r, status: f.status, steps: f.steps ?? [], event_id: f.event_id ?? r.event_id } : r;
+  });
+  return NextResponse.json({ runs: merged.map(slim) }, { headers: { "cache-control": "no-store", "x-run-feed": live.size ? "firestore" : "postgres" } });
 }
