@@ -436,6 +436,44 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     takeAll(root);
 
     let wrote = false;
+    let wroteHere = false; // something was written since the last tab change
+    // The page scrolls with the writing, like reading down a page: only once the words
+    // reach the bottom of the screen, smoothly, and never ahead to what is not written yet.
+    let scrolled = 0;
+    // What actually scrolls: the page itself, or else the nearest panel that scrolls a real distance
+    // (boxes with only a horizontal scroll also report overflow-y auto, so the distance is checked).
+    const pane = (): HTMLElement => {
+      const doc = (document.scrollingElement as HTMLElement) ?? document.documentElement;
+      if (doc.scrollHeight - window.innerHeight > 40) return doc;
+      for (let n = root.parentElement; n; n = n.parentElement) {
+        const o = getComputedStyle(n).overflowY;
+        if ((o === "auto" || o === "scroll") && n.scrollHeight - n.clientHeight > 40 && n.clientHeight > 200) return n;
+      }
+      return doc;
+    };
+    const follow = (p: { x: number; y: number }) => {
+      setPos(p);
+      if (!followRef.current || Date.now() - scrolled < 350) return;
+      const h = window.innerHeight;
+      if (p.y > h - 110 || p.y < 90) {
+        scrolled = Date.now();
+        const el = pane();
+        glide = { el, to: Math.max(0, el.scrollTop + p.y - h * (p.y < 90 ? 0.3 : 0.62)) };
+      }
+    };
+    // Our own ease-out glide, a little each frame (native smooth scrolling stalls in some recorders).
+    let glide: { el: HTMLElement; to: number } | null = null;
+    const glider = setInterval(() => {
+      if (!glide) return;
+      const { el, to } = glide;
+      const d = to - el.scrollTop;
+      if (Math.abs(d) < 2) {
+        el.scrollTop = to;
+        glide = null;
+        return;
+      }
+      el.scrollTop += Math.sign(d) * Math.max(2, Math.abs(d) * 0.14);
+    }, 16);
     (async () => {
       while (!stopped) {
         const el = queue.shift();
@@ -447,13 +485,10 @@ export function LiveBuild({ eventId }: { eventId: string }) {
             continue;
           }
           writing = el;
-          if (followRef.current && (r.top > window.innerHeight - 80 || r.bottom < 120)) {
-            el.scrollIntoView({ block: "center", behavior: "smooth" });
-            await sleep(380);
-          }
           const words = el.textContent?.split(/\s+/).length ?? 1;
           const ms = Math.min(42, Math.max(10, PAGE_MS / Math.max(1, (queue.length + 1) * Math.max(6, words))));
-          await writeIn(el, ms, (p) => setPos(p), () => stopped, quiet);
+          await writeIn(el, ms, follow, () => stopped, quiet);
+          wroteHere = true;
           writing = null;
           wrote = true;
           await sleep(60);
@@ -473,6 +508,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           }
           pending = null;
           arrived = Date.now();
+          if (followRef.current && !wroteHere) pane().scrollTo({ top: 0, behavior: "instant" });
           continue;
         }
         // Page written: on to the next tab along the tab bar, once Gemini has finished it.
@@ -487,7 +523,11 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           pushedAt = Date.now();
           // Tasks opens on the timeline (every task, planned back from the event day); Files on the proposal.
           const query = next === "tasks" ? "?view=timeline" : next === "outputs" ? "?folder=proposal" : "";
-          router.push(`/events/${eventId}${next ? `/${next}` : ""}${query}`);
+          // Each tab opens at the top, header and all; the writing then leads the way down.
+          glide = null;
+          router.push(`/events/${eventId}${next ? `/${next}` : ""}${query}`, { scroll: false });
+          pane().scrollTo({ top: 0, behavior: "instant" });
+          wroteHere = false;
           const h = root.querySelector("h2, h3, th, [class*='mono-label']")?.getBoundingClientRect();
           if (h) setPos({ x: h.left + 12, y: h.top + 10 });
         } else if (!upNext && !liveRef.current) {
@@ -499,6 +539,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     })();
     return () => {
       stopped = true;
+      clearInterval(glider);
       content.disconnect();
       head.disconnect();
       queue.splice(0).forEach((el) => el.classList.remove("mv-pending"));
