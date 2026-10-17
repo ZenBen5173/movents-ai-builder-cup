@@ -423,7 +423,12 @@ const ALL_TOOLS: Tool[] = [
   { name: "draft_budget", description: "Compose the budget with 10% contingency and run the adapt loop (swap to cheaper vendors, apply cuts) until it fits the cap.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Draft budget & adapt", "draft_budget", async () => { const s = await T.readSop(String(a.event_id)); const r = await T.draftBudget(String(a.event_id), s.signals); return { iterations: r.iterations.map((i) => ({ label: i.label, total: i.total, withinCap: i.withinCap, change: i.change })), final_total: r.final.total, shortfall: r.shortfall }; }) },
   { name: "validate_budget", description: "Check total ≤ cap incl. contingency, contingency present, supplier links present.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Validate budget", "validate_budget", () => T.checkBudget(String(a.event_id))) },
   { name: "generate_risks", description: "Generate the risk register with mitigations and a weather/contingency plan (Open-Meteo data).", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Risk register", "generate_risks", () => T.generateRisks(String(a.event_id))) },
-  { name: "generate_ops_pack", description: "Generate the 15-minute run sheet, promotion checklist, reminder cadence and volunteer roster.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Ops pack", "generate_ops_pack", () => T.generateOpsPack(String(a.event_id))) },
+  { name: "generate_ops_pack", description: "Generate the 15-minute run sheet, promotion checklist, reminder cadence and volunteer roster.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Ops pack", "generate_ops_pack", async () => {
+    const r = await T.generateOpsPack(String(a.event_id));
+    // A demo society has volunteers to put on the roster.
+    if (u.email?.endsWith("@movents.test")) await (await import("../demo")).sampleCrew(String(a.event_id)).catch(() => null);
+    return r;
+  }) },
   { name: "validate_proposal", description: "Check that the generated proposal contains every section the university SOP requires.", inputSchema: { type: "object", properties: { ...ev, ...runId }, required: ["event_id"] }, run: (a, u) => traced(u, a, "Validate proposal", "validate_proposal", () => T.checkProposal(String(a.event_id))) },
   {
     name: "update_event",

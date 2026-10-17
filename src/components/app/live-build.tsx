@@ -54,6 +54,25 @@ const AGENT: { match: RegExp; seg: string; doing: string }[] = [
   { match: /planner/i, seg: "", doing: "planning" },
 ];
 
+/**
+ * The live tour walks the tabs left to right, as the tab bar shows them, and
+ * opens a tab only once Gemini has finished the step that fills it, so a tab is
+ * never shown half-made (no placeholder speakers, no empty sponsor funnel).
+ * Inbox and Meetings are left out: their content is not written during a build.
+ */
+const TOUR: { seg: string; ready: RegExp }[] = [
+  { seg: "", ready: /match_venue|check_lead_times/ },
+  { seg: "tasks", ready: /plan_timeline/ },
+  { seg: "risks", ready: /generate_risks|add_risks/ },
+  { seg: "budget", ready: /draft_budget/ },
+  { seg: "speakers", ready: /save_speakers/ },
+  { seg: "suppliers", ready: /save_supplier_quotes|research_suppliers/ },
+  { seg: "sponsors", ready: /save_sponsors|find_sponsors/ },
+  { seg: "promotion", ready: /generate_marketing_kit/ },
+  { seg: "day", ready: /generate_ops_pack/ },
+  { seg: "outputs", ready: /write_proposal_sections|get_outputs/ },
+];
+
 export function stepInfo(tool: string, name = "") {
   const k = toolKey(tool);
   return STEP.find((s) => s.match.test(k)) ?? AGENT.find((a) => a.match.test(name)) ?? { seg: "", doing: "working" };
@@ -241,10 +260,20 @@ async function writeIn(el: HTMLElement, msPerToken: number, onCaret: (p: { x: nu
   el.classList.remove("mv-pending");
   el.classList.add("mv-write");
   const perTick = Math.max(1, Math.round(16 / msPerToken));
+  // Pictures, bars and charts have no words: each shows once the writing reaches it.
+  const blank = subs.filter((x) => !x.textContent?.trim());
+  const reach = (node: Node) => {
+    for (const b of blank)
+      if (b.classList.contains("mv-pending") && b.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        b.classList.remove("mv-pending");
+        b.classList.add("mv-write");
+      }
+  };
   try {
     for (const { node, text } of nodes) {
       if (stop()) break;
       if (!node.isConnected) continue; // replaced by fresh data meanwhile: that is queued on its own
+      reach(node);
       for (let p = node.parentElement; p && p !== el.parentElement; p = p.parentElement) {
         if (p.classList.contains("mv-pending")) {
           p.classList.remove("mv-pending");
@@ -293,7 +322,9 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   posRef.current = pos;
   const [burst, setBurst] = useState<{ x: number; y: number; k: number } | null>(null);
   // Tabs to visit, in the order Gemini worked on them; the page being written is finished first.
-  const targets = useRef<string[]>([]);
+  // Tabs whose filling step Gemini has finished, and tabs it touched at all.
+  const ready = useRef(new Set<string>());
+  const touched = useRef(new Set<string>());
 
   const steps = run?.steps ?? [];
   const current = steps.at(-1) ?? null;
@@ -316,6 +347,8 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   useEffect(() => {
     if (!live) return;
     visited.current.clear();
+    ready.current.clear();
+    touched.current.clear();
     setEngaged(true);
   }, [live]);
 
@@ -325,20 +358,22 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
     if (!current) return;
+    // A step finishing changes no ids, so readiness is read from every step on every poll.
+    for (const st of steps) {
+      touched.current.add(stepInfo(st.tool, st.name).seg);
+      const t = TOUR.find((x) => x.ready.test(toolKey(st.tool)));
+      if (t && st.status !== "running") ready.current.add(t.seg);
+    }
     const first = seen.current === null;
     const known = (seen.current ??= new Set());
     const fresh = steps.filter((st) => !known.has(st.id));
     fresh.forEach((st) => known.add(st.id));
     if (!fresh.length || (first && !live)) return;
-    // Each tab once per build: parallel agents would otherwise bounce the view between tabs.
-    for (const st of fresh) {
-      const seg = stepInfo(st.tool, st.name).seg;
-      if (!visited.current.has(seg) && !targets.current.includes(seg)) targets.current.push(seg);
-    }
+
     const t = setTimeout(() => router.refresh(), 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, steps.length]);
+  }, [current?.id, steps.length, steps.filter((st) => st.status !== "running").length]);
 
   // The writer: anything new on the page (a tab Gemini moved to, rows that just
   // landed, a header value that changed) waits hidden, then is written in.
@@ -432,13 +467,13 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           arrived = Date.now();
           continue;
         }
-        // Page written: follow Gemini to the next tab it worked on.
-        if (!followRef.current) targets.current = [];
+        // Page written: on to the next tab along the tab bar, once Gemini has finished it.
+        // While the run is live a tab that is not ready yet is waited for, never skipped.
         visited.current.add(segRef.current);
-        while (targets.current.length && visited.current.has(targets.current[0])) targets.current.shift();
-        const next = targets.current[0];
+        const left = followRef.current ? TOUR.filter((t) => !visited.current.has(t.seg) && (liveRef.current || touched.current.has(t.seg))) : [];
+        const upNext = left[0];
+        const next = upNext && (ready.current.has(upNext.seg) || !liveRef.current) ? upNext.seg : undefined;
         if (next !== undefined && Date.now() - arrived > MIN_DWELL_MS) {
-          targets.current.shift();
           visited.current.add(next);
           pending = next;
           pushedAt = Date.now();
@@ -446,7 +481,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           router.push(`/events/${eventId}${next ? `/${next}` : ""}${next === "tasks" ? "?view=timeline" : ""}`);
           const h = root.querySelector("h2, h3, th, [class*='mono-label']")?.getBoundingClientRect();
           if (h) setPos({ x: h.left + 12, y: h.top + 10 });
-        } else if (next === undefined && !liveRef.current) {
+        } else if (!upNext && !liveRef.current) {
           setEngaged(false);
           return;
         }

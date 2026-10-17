@@ -94,7 +94,7 @@ function KitCard({ c, index, nano, blob }: { c: KitItem; index: number; nano: bo
         }}
         onMouseLeave={() => setTilt({ x: 0, y: 0 })}
       >
-        <motion.div animate={{ rotateX: tilt.x, rotateY: tilt.y }} transition={{ type: "spring", stiffness: 200, damping: 18 }} className="relative w-full overflow-hidden rounded-xl shadow-xl" style={{ aspectRatio: `${c.width} / ${c.height}`, maxHeight: 340, width: c.width >= c.height ? "100%" : `${(340 * c.width) / c.height}px` }}>
+        <motion.div animate={{ rotateX: tilt.x, rotateY: tilt.y }} transition={{ type: "spring", stiffness: 200, damping: 18 }} className="relative w-full overflow-hidden rounded-xl bg-sand shadow-xl" style={{ aspectRatio: `${c.width} / ${c.height}`, maxHeight: 340, width: c.width >= c.height ? "100%" : `${(340 * c.width) / c.height}px` }}>
           {c.video ? (
             <video src={c.href} controls playsInline className="size-full object-cover" />
           ) : (

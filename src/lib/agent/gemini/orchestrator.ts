@@ -143,6 +143,8 @@ async function foundation(run: Run, user: User, p: NonNullable<Awaited<ReturnTyp
   });
   ["sop", "venue", "timeline"].forEach((k) => ctx.done.add(k));
   ctx.card = await eventCard(eventId, p.audience, p.goals);
+  // A demo society's committee has already shared a few files, so Files is never empty mid-build.
+  if (isDemo(user)) await (await import("../../demo")).sampleFiles(user, eventId).catch(() => null);
 
   const briefs = await run.step("Planner: brief the specialist agents", label("planner"), {}, async () => {
     const { data } = await geminiJson<Briefs>({
@@ -324,9 +326,15 @@ async function sponsorAgent(ctx: Ctx, feedback?: string) {
     await withAgent({ run: ctx.run, label: label("sponsor agent"), requireApproval: true }, () =>
       findTool("save_sponsors")!.run({ event_id: ctx.eventId, run_id: ctx.run.id, sponsors: r.kept.map((s) => ({ company: s.name, website: officialSite(s.website) ?? undefined, industry: s.industry, ask: s.ask, fit_reason: `${s.fit_reason} (source: ${s.source_url})` })) }, ctx.user),
     );
+    // In a demo the pipeline is a few weeks in (an offer, replies), straight away, so the tour shows it.
+    if (isDemo(ctx.user)) await (await import("../../demo")).sampleSponsorProgress(ctx.eventId).catch(() => null);
     return { output: { kept: r.kept, dropped: r.dropped, queries: r.queries }, summary: r.kept.map((s) => s.name).join(", "), validation: [{ check: "Every sponsor has a cited source", passed: true, detail: `${r.kept.length} cited, ${r.dropped.length} dropped` }] };
   });
 }
+
+
+/** A demo sandbox user (Try the live demo): gets sample data so every tab has something to show. */
+const isDemo = (u: Pick<User, "email">) => Boolean(u.email?.endsWith("@movents.test"));
 
 // ------------------------------------------------------------------ checker
 
@@ -407,7 +415,7 @@ async function approvals(ctx: Ctx) {
   });
   ctx.done.add("approvals");
   // A demo society also gets sample registrations and emails, so every tab has something to show.
-  if (user.email?.endsWith("@movents.test")) {
+  if (isDemo(user)) {
     const { demoExtras } = await import("../../demo");
     await demoExtras(user, eventId, { trail: false }).catch(() => null);
   }
@@ -478,7 +486,7 @@ export async function researchEvent(user: User, eventId: string, what: { speaker
     }
     if (what.speakers) await run.output("Speakers", `/events/${eventId}/speakers`, "page");
     if (what.sponsors) await run.output("Sponsors", `/events/${eventId}/sponsors`, "page");
-    if (user.email?.endsWith("@movents.test")) {
+    if (isDemo(user)) {
       const demo = await import("../../demo");
       if (what.sponsors) await demo.sampleSponsorProgress(eventId).catch(() => null);
       await demo.sampleReplies(user, eventId).catch(() => null);

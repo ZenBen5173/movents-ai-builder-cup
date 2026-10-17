@@ -305,6 +305,15 @@ export async function sampleKickoffNotes(user: import("./types").User, eventId: 
   });
 }
 
+/** Names on the roster's open volunteer slots, so the crew is a real team. */
+export async function sampleCrew(eventId: string) {
+  const open = await query<{ id: string }>("SELECT id FROM volunteers WHERE event_id = $1 AND name LIKE '%(to assign)%' ORDER BY id", [eventId]);
+  for (const [i, v] of open.entries()) {
+    const name = `${FIRST[(i * 5 + 3) % FIRST.length]} ${LAST[(i * 3 + 1) % LAST.length]}`;
+    await query("UPDATE volunteers SET name = $2, phone = $3 WHERE id = $1", [v.id, name, `01${(i % 9) + 1}-${String(4200000 + i * 81731).slice(0, 7)}`]);
+  }
+}
+
 /** A few documents the committee already shared, so Files is not empty: a contact list, meeting notes, a signed form. */
 export async function sampleFiles(user: import("./types").User, eventId: string) {
   if (await one("SELECT 1 FROM event_files WHERE event_id = $1 LIMIT 1", [eventId])) return;
@@ -352,7 +361,7 @@ export async function sampleFiles(user: import("./types").User, eventId: string)
 }
 
 /**
- * Bookings on every venue at the university for the next two months (lectures,
+ * Bookings on every venue at the university around today (lectures,
  * exams, other societies), so each venue's availability calendar shows real
  * busy and free time. Shared by every demo; tops a venue up only when it is quiet.
  */
@@ -362,12 +371,16 @@ export async function sampleVenueBookings(universityId: string) {
   const SOC = ["Debate Club", "Robotics Society", "Music Club", "Entrepreneurship Society", "Photography Club", "Red Crescent"];
   const CLASS = ["Lecture: Data Structures", "Lecture: Marketing 101", "Tutorial: Statistics", "Lab: Embedded Systems"];
   for (const [v, venue] of venues.entries()) {
-    const have = await one<{ n: number }>("SELECT count(*)::int AS n FROM venue_bookings WHERE venue_id = $1 AND date >= $2", [venue.id, day(0)]);
-    if (Number(have?.n) >= 6) continue;
+    // Enough this month and next that the calendar opens full, whatever day it is.
+    const have = await one<{ n: number }>("SELECT count(*)::int AS n FROM venue_bookings WHERE venue_id = $1 AND date >= $2", [venue.id, day(-14)]);
+    if (Number(have?.n) >= 14) continue;
     const rows: [string, string | null, string, string, string, string][] = [];
-    // A weekly class, two society events and an exam, spread over eight weeks.
-    for (let w = 0; w < 8; w++) rows.push([CLASS[v % CLASS.length], "Faculty timetable", "class", day(1 + ((v * 2) % 5) + w * 7), "09:00", "11:00"]);
-    for (let k = 0; k < 4; k++) rows.push([`${SOC[(v + k) % SOC.length]} event`, SOC[(v + k) % SOC.length], "society", day(3 + ((v * 3 + k * 11) % 50)), k % 2 ? "19:00" : "14:00", k % 2 ? "22:00" : "17:00"]);
+    // Two classes a week, six society events and an exam, from two weeks ago to two months on.
+    for (let w = -2; w < 9; w++) {
+      rows.push([CLASS[v % CLASS.length], "Faculty timetable", "class", day(1 + ((v * 2) % 3) + w * 7), "09:00", "11:00"]);
+      rows.push([CLASS[(v + 1) % CLASS.length], "Faculty timetable", "class", day(3 + ((v * 2) % 3) + w * 7), "14:00", "16:00"]);
+    }
+    for (let k = 0; k < 6; k++) rows.push([`${SOC[(v + k) % SOC.length]} event`, SOC[(v + k) % SOC.length], "society", day(-10 + ((v * 3 + k * 11) % 60)), k % 2 ? "19:00" : "17:00", k % 2 ? "22:00" : "19:00"]);
     rows.push([`Final exam: ${["Calculus", "Accounting", "Programming", "Biology"][v % 4]}`, "Examinations unit", "exam", day(40 + (v % 7)), "09:00", "12:00"]);
     for (const [title, holder, kind, date, start, end] of rows) {
       await query("INSERT INTO venue_bookings (id, venue_id, title, holder, kind, date, start_time, end_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id("vbk"), venue.id, title, holder, kind, date, start, end]);
