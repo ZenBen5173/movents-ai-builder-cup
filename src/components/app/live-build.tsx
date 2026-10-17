@@ -214,7 +214,6 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [pos, setPos] = useState({ x: -100, y: -100 });
-  const [building, setBuilding] = useState(false);
   const [burst, setBurst] = useState<{ x: number; y: number; k: number } | null>(null);
   const lastStep = useRef<string | null>(null);
   const tick = useRef(0);
@@ -224,7 +223,7 @@ export function LiveBuild({ eventId }: { eventId: string }) {
   const info = current ? stepInfo(current.tool, current.name) : null;
   const who = run?.source === "gemini" ? "Gemini" : "Your assistant";
   // The latest thing it concluded, shown as its reasoning next to the cursor.
-  const thought = [...steps].reverse().find((s) => s.status !== "running" && s.summary)?.summary?.replace(/\s+/g, " ").slice(0, 140) ?? null;
+  const thought = [...steps].reverse().find((s) => s.status !== "running" && s.summary && !/^[[{]/.test(s.summary.trim()))?.summary?.replace(/\s+/g, " ").slice(0, 140) ?? null;
   const live = run && run.status === "running";
   const done = run && run.status !== "running";
   const seg = path.split(`/events/${eventId}`)[1]?.replace(/^\//, "").split("/")[0] ?? "";
@@ -236,12 +235,8 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     lastStep.current = current.id;
     if (first && !live) return;
     if (follow && info && info.seg !== seg) router.push(`/events/${eventId}${info.seg ? `/${info.seg}` : ""}`);
-    setBuilding(true);
-    const t1 = setTimeout(() => router.refresh(), 700);
-    const t2 = setTimeout(() => {
-      setBuilding(false);
-      setBurst((b) => ({ ...pos, k: (b?.k ?? 0) + 1 }));
-    }, 1500);
+    const t1 = setTimeout(() => router.refresh(), 500);
+    const t2 = setTimeout(() => setBurst((b) => ({ ...pos, k: (b?.k ?? 0) + 1 })), 900);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -249,8 +244,54 @@ export function LiveBuild({ eventId }: { eventId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  // Keep the cursor busy over the page while the run is live.
+  // While the run is live, anything new on the page is held back, then written in
+  // one item at a time with the cursor on it, so you see Gemini filling the tab.
+  const queue = useRef<HTMLElement[]>([]);
+  useEffect(() => {
+    const root = host.current?.parentElement;
+    if (!live || !root || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const q = queue.current; // one array, emptied and refilled in place
+    const seen = new WeakSet<Element>();
+    const SEL = "tr, li, article, [class*='rounded-xl'], [class*='rounded-2xl']";
+    const take = (el: Element) => {
+      if (!(el instanceof HTMLElement) || seen.has(el) || host.current?.contains(el)) return;
+      // Only the outermost new item: its children appear with it.
+      if (queue.current.some((q) => q.contains(el))) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 14) return;
+      seen.add(el);
+      el.classList.add("mv-pending");
+      queue.current.push(el);
+    };
+    const obs = new MutationObserver((list) => {
+      for (const m of list)
+        for (const n of m.addedNodes) {
+          if (!(n instanceof Element)) continue;
+          if (n.matches(SEL)) take(n);
+          else n.querySelectorAll(SEL).forEach(take);
+        }
+      if (queue.current.length > 60) queue.current.splice(0, queue.current.length - 60).forEach((el) => el.classList.remove("mv-pending"));
+    });
+    obs.observe(root, { childList: true, subtree: true });
+    const drain = setInterval(() => {
+      const el = queue.current.shift();
+      if (!el) return;
+      el.classList.remove("mv-pending");
+      el.classList.add("mv-reveal");
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 0 && r.top < window.innerHeight) setPos({ x: r.left + Math.min(r.width - 24, 36), y: r.top + Math.min(r.height / 2, 22) });
+      setTimeout(() => el.classList.remove("mv-reveal"), 1200);
+    }, 110);
+    return () => {
+      obs.disconnect();
+      clearInterval(drain);
+      q.splice(0).forEach((el) => el.classList.remove("mv-pending"));
+    };
+  }, [live]);
+
+  // Keep the cursor busy over the page while the run is live (when nothing is being written in).
   const wander = useCallback(() => {
+    if (queue.current.length) return;
     tick.current += 1;
     setPos(spotIn(host.current?.parentElement ?? null, tick.current));
   }, []);
@@ -288,21 +329,6 @@ export function LiveBuild({ eventId }: { eventId: string }) {
           <motion.div className="h-full bg-tomato" animate={{ width: `${Math.min(100, (doneCount / 24) * 100)}%` }} transition={{ type: "spring", stiffness: 80, damping: 20 }} />
         </div>
       </div>
-
-      {/* Skeleton while the step lands, then it fades to reveal the real content. */}
-      <AnimatePresence>
-        {building && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="pointer-events-none absolute inset-x-0 bottom-0 top-14 z-30 overflow-hidden rounded-xl bg-background/80 backdrop-blur-[1.5px]">
-            <div className="space-y-3 p-2">
-              {[0.9, 0.6, 0.8, 0.45, 0.7, 0.55].map((w, i) => (
-                <div key={i} className="relative h-10 overflow-hidden rounded-lg bg-sand/80" style={{ width: `${w * 100}%` }}>
-                  <motion.span className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/80 to-transparent" animate={{ x: ["-100%", "300%"] }} transition={{ repeat: Infinity, duration: 1.1, ease: "linear", delay: i * 0.08 }} />
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Little live feed of the last steps. */}
       <div className="pointer-events-none fixed bottom-5 right-[100px] z-[60] w-72 space-y-1.5">

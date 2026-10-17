@@ -108,6 +108,7 @@ function describe(out: unknown): { status: StepStatus; summary?: string; validat
     if (o.university) return { status: "ok", summary: `${String(o.university)} SOP v${String(o.sopVersion)}` };
     if (Array.isArray(o.creatives)) return { status: "ok", summary: `${o.creatives.length} creatives: ${(o.creatives as { kind: string }[]).map((c) => c.kind).join(", ")}` };
     if (typeof o.count === "number") return { status: "ok", summary: `${o.count} risks` };
+    if (typeof o.meeting_id === "string" && o.when) return { status: "ok", summary: `Booked ${String(o.title ?? "meeting")}, ${String(o.when)}${typeof o.attendees === "number" ? `, ${o.attendees} people` : ""}` };
     if (Array.isArray(o.written)) return { status: "ok", summary: `Wrote ${(o.written as string[]).join(", ")}` };
     if (typeof o.added === "number" && Array.isArray(o.risks)) return { status: "ok", summary: `${o.added} event-specific risk(s) added: ${(o.risks as { category: string; score: number }[]).map((r) => `${r.category} (score ${r.score})`).join(", ")}` };
     if (typeof o.runsheetBlocks === "number") return { status: "ok", summary: `${o.runsheetBlocks} run-sheet blocks, ${String(o.promoItems)} promo tasks, ${String(o.reminders)} reminders` };

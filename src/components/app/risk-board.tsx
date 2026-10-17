@@ -26,24 +26,37 @@ function Matrix({ risks, focus, setFocus }: { risks: R[]; focus: string | null; 
           {[5, 4, 3, 2, 1].map((l) =>
             [1, 2, 3, 4, 5].map((i) => {
               const here = risks.filter((r) => r.likelihood === l && r.impact === i && r.status !== "closed");
+              // Every cell stays the same square: up to 4 dots, then "+N" with the rest in the tooltip.
+              const shown = here.length > 4 ? here.slice(0, 3) : here;
+              const extra = here.slice(shown.length);
               return (
-                <div key={`${l}-${i}`} className={cn("relative flex aspect-square flex-wrap content-start gap-1 rounded-md border border-ink/10 p-1", zoneSoft(l * i))}>
+                <div key={`${l}-${i}`} className={cn("relative aspect-square rounded-md border border-ink/10", zoneSoft(l * i))}>
                   <span className="absolute bottom-0.5 right-1 font-mono text-[9px] text-ink/30">{l * i}</span>
-                  {here.map((r, k) => (
-                    <motion.button
-                      key={r.id}
-                      layoutId={`risk-dot-${r.id}`}
-                      initial={{ scale: 0 }}
-                      animate={{ scale: focus === r.id ? 1.25 : 1 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 18, delay: k * 0.04 }}
-                      onMouseEnter={() => setFocus(r.id)}
-                      onMouseLeave={() => setFocus(null)}
-                      title={`${r.category}: ${r.description}`}
-                      className={cn("grid size-6 place-items-center rounded-full border-[1.5px] border-ink text-[9px] font-bold", zone(r.likelihood * r.impact))}
-                    >
-                      {r.category.slice(0, 2).toUpperCase()}
-                    </motion.button>
-                  ))}
+                  <div className="absolute inset-1 flex flex-wrap content-start gap-1 overflow-hidden">
+                    {shown.map((r, k) => (
+                      <motion.button
+                        key={r.id}
+                        layoutId={`risk-dot-${r.id}`}
+                        initial={{ scale: 0 }}
+                        animate={{ scale: focus === r.id ? 1.25 : 1 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 18, delay: k * 0.04 }}
+                        onMouseEnter={() => setFocus(r.id)}
+                        onMouseLeave={() => setFocus(null)}
+                        title={`${r.category}: ${r.description}`}
+                        className={cn("grid size-6 place-items-center rounded-full border-[1.5px] border-ink text-[9px] font-bold", zone(r.likelihood * r.impact))}
+                      >
+                        {r.category.slice(0, 2).toUpperCase()}
+                      </motion.button>
+                    ))}
+                    {extra.length > 0 && (
+                      <span
+                        title={extra.map((r) => `${r.category}: ${r.description}`).join(" · ")}
+                        className="grid size-6 place-items-center rounded-full border-[1.5px] border-dashed border-ink bg-card text-[9px] font-bold"
+                      >
+                        +{extra.length}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             }),
