@@ -9,14 +9,28 @@ A team of Gemini agents that plans university society events for volunteer commi
 
 <p align="center">
   <a href="https://movents-743449161087.asia-southeast1.run.app"><b>Open the live app</b></a> ·
+  <a href="#demo-video"><b>Demo video</b></a> ·
+  <a href="docs/Movents-Pitch-Deck.pdf"><b>Pitch deck (PDF)</b></a> ·
   <a href="#try-it-in-2-minutes"><b>Try it in 2 minutes</b></a> ·
-  <a href="#architecture"><b>Architecture</b></a> ·
-  <a href="docs/DEPLOYMENT.md"><b>Deploy</b></a>
+  <a href="#architecture"><b>Architecture</b></a>
 </p>
 
-> Google Cloud AI Builder Cup 2026 · Theme 5: Future of Work & Enterprise Productivity
+> Google Cloud AI Builder Cup 2026 · Theme 5: Future of Work & Enterprise Productivity · Team **GIT OUTTA HERE**
 
-![A live Gemini run: the planner, specialist agents, checker and re-plan steps, with the final note and time saved](docs/screenshots/gemini-run.png)
+| One prompt in | Gemini agents plan it live | The event pack |
+|---|---|---|
+| ![The one-sentence brief, filled in](docs/screenshots/prompt-screen.png) | ![Gemini's agents planning live: run sheet, checks and adapted steps](docs/screenshots/live-agent-timeline.png) | ![The finished event with its proposal, budget, risk and marketing files](docs/screenshots/event-pack.png) |
+
+## Submission
+
+| | |
+|---|---|
+| **Live app** | https://movents-743449161087.asia-southeast1.run.app (Cloud Run, asia-southeast1). Click **Try the live demo**, no account needed |
+| **Code** | This repository, public, branch `main` |
+| **Pitch deck** | [docs/Movents-Pitch-Deck.pdf](docs/Movents-Pitch-Deck.pdf) |
+| **Demo video** | See [Demo video](#demo-video) |
+| **Gen AI** | Gemini on Vertex AI, used inside the app (planner, six specialist agents, checker, Movi the editing helper) |
+| **QR code** | [docs/movents-qr.png](docs/movents-qr.png) opens the live app |
 
 ## The problem
 
@@ -28,7 +42,7 @@ same work is redone every semester.
 
 ## What Movents does
 
-Type the event the way you would say it:
+Fill in the blanks, type it, or say it out loud:
 
 > "We want a hands-on Gemini workshop for about 80 first-years next month, Saturday morning, RM1,500 max. Hafiz and Mei Ling are helping."
 
@@ -47,8 +61,10 @@ A team of Gemini agents then plans it inside Movents, and you watch every step l
    Gemini review for consistency and quality, like a strict faculty advisor.
 4. **Re-plan:** anything fixable goes back to the agent that owns it, with the problem attached. Decisions only a
    human can make (like moving the date) are listed for the organiser.
-5. **Approvals:** speaker invites, supplier quote requests, budget sign-off, faculty submission and event pages are
-   drafted and **queued for a human**. The AI never sends or publishes on its own, whatever the user's role.
+5. **Approvals:** speaker invites, sponsor pitches and supplier quote requests become **drafts** in the event's inbox
+   for the committee to check and send. Money (the budget and deposits) and the faculty submission go up the
+   society's **sign-off chain**: committee, head of department, vice president, president. The AI never sends,
+   pays or publishes on its own, whatever the user's role.
 
 You walk out with the Event Pack: proposal (PDF and Word), budget (Excel and CSV), risk register, run sheet,
 timeline (calendar file) and marketing kit.
@@ -63,8 +79,9 @@ about 2 to 3 minutes and ended with 8 actions waiting for approval.
 - **No invented people or prices.** Research runs in two steps: a Gemini answer grounded in Google Search, then a
   JSON extraction of that answer. Each person, supplier or sponsor is kept only if Google's citations back it, and
   its link is that citation. Anything else is dropped, and the trace says so.
-- **Human in the loop.** Every outbound action passes one approval gate (`src/lib/actions.ts`). Approvals are
-  role-based (President, VP, Directors), and everything is audit-logged.
+- **Human in the loop.** Every outbound action passes one approval gate (`src/lib/actions.ts`). What the AI drafts
+  waits for a person to send; money and faculty emails wait for sign-off up the society's hierarchy. Everything is
+  audit-logged.
 - **Same permissions as the user.** Agents call the same tools as the app, with the same society isolation and
   event-team checks. An agent cannot touch an event its user cannot.
 - **It degrades, it does not break.** Busy model: the next model takes over. Gemini down: the rule-based planner
@@ -107,7 +124,7 @@ flowchart LR
   end
   W --> Agents
   S & B & SP -->|grounded search + citations| G[Google Search]
-  Agents -->|function calling| T[49 Movents tools<br/>role and team checks]
+  Agents -->|function calling| T[54 Movents tools<br/>role and team checks]
   T --> DB[(Postgres on Neon)]
   T --> A[Approval gate]
   A -->|human approves| O[Email, Luma, calendar]
@@ -115,7 +132,7 @@ flowchart LR
   SCH[Cloud Scheduler] -->|daily 9am| W
 ```
 
-- **One tool registry, two front doors.** The same 49 tools power the in-app Gemini agents (function calling) and
+- **One tool registry, two front doors.** The same 54 tools power the in-app Gemini agents (function calling) and
   the MCP server at `/api/mcp` for outside assistants.
 - **Agent loop** (`src/lib/agent/gemini/loop.ts`): Gemini picks a tool, Movents checks membership and role, runs it,
   and sends the result back, until Gemini answers in text. Tool errors go back to the model so it can correct itself.
@@ -157,20 +174,30 @@ Data lives in Postgres on Neon (free tier, Singapore).
 | **Backstage approvals** | **Sponsors** |
 | ![Backstage](docs/screenshots/backstage.png) | ![Sponsors](docs/screenshots/sponsors.png) |
 
-Beyond the planner, Movents is a full society workspace: tasks (list, board, Gantt), risk heat map, supplier
-contracts and deposits, sponsor outreach, meetings with minutes, registration with QR check-in, a venue calendar,
-an SOP library per university and a full audit log. See the [user guide](docs/USER_GUIDE.md).
+Beyond the planner, Movents is a full society workspace:
 
-## Roles
+- **Live build:** while Gemini works, each tab is written in item by item, with its cursor at the words being written.
+- **Edit anything:** every budget line, speaker, sponsor, supplier quote, risk, attendee, checklist item and the
+  proposal wording can be changed by hand. **Movi**, the helper in the corner, makes the same edits from a sentence
+  ("make the speaker gift RM100 each") and shows each change for you to accept first.
+- **Event inbox:** a Gmail-style mailbox per event, filtered by the event's label, with Gemini's drafts in Drafts.
+- **Meetings** with agendas, minutes and decisions; action items become tasks in one tap.
+- **Files:** the generated documents plus anything the committee uploads, in one place.
+- **Door check-in** by name or by scanning the ticket QR.
+- Tasks (list, board, timeline), risk heat map, supplier contracts and deposits, sponsor pipeline, venue calendars
+  and floor plans, an SOP library per university and a full audit log.
 
-| Role | Can do without approval |
-|---|---|
-| President / VP | Everything; manage members |
-| Director | Speaker and supplier emails, approvals for their own department, budget up to the SOP limit |
-| Committee member | Drafts, plans and internal calendar. Everything outbound goes to Backstage for approval |
-| Faculty advisor | Approves or rejects the proposal from the emailed link |
+See the [user guide](docs/USER_GUIDE.md).
 
-The Gemini agents act as the signed-in user with these permissions, and always queue outbound actions for a human.
+## Roles and sign-off
+
+Only three things need sign-off: the **budget**, **deposits** (money out) and **emails to the faculty**. They go up
+the society's chain, **committee → head of department → vice president → president**, in Backstage. Everything else
+(speaker, sponsor and supplier emails, plans, the calendar) the committee does directly. The faculty advisor approves
+or rejects the proposal from an emailed link.
+
+The Gemini agents act as the signed-in user with the same permissions, and never send anything themselves: outreach
+becomes drafts, and money and faculty emails wait for sign-off.
 
 ## Run it yourself
 
@@ -201,10 +228,12 @@ Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 |---|---|
 | `src/lib/agent/gemini/` | Orchestrator, agent loop, grounded research, brief parsing |
 | `src/lib/ai/gemini.ts` | Gemini client: Vertex AI or API key, model fallback, retries |
-| `src/lib/agent/registry.ts` | The 49 tools, shared by the Gemini agents and MCP |
+| `src/lib/agent/registry.ts` | The 54 tools, shared by the Gemini agents, Movi and MCP |
 | `src/lib/actions.ts` | The approval gate for every outbound action |
 | `src/lib/planning.ts` | Deterministic planning: timeline, venue, budget, risks |
-| `tests/` | 61 tests, including the agent loop, citations and the approval gate |
+| `src/lib/agent/gemini/assistant.ts` | Movi: edit an event from a sentence, as proposals you accept |
+| `src/components/app/live-build.tsx` | The live build: the tour and the writer |
+| `tests/` | 62 tests, including the agent loop, citations and the approval gate |
 
 ## Security
 
@@ -212,9 +241,14 @@ Security headers (CSP, HSTS, frame blocking), CSRF origin checks, rate limits on
 and MCP, signed expiring links for anything shared outside the app, tenant isolation on every query, type-checked
 and size-capped uploads, and errors logged server-side without leaking internals.
 
+## Demo video
+
+_Link added with the final cut._
+
 ## Team
 
-_To be added._
+**GIT OUTTA HERE**: Teo Zen Ben, Jeanette Tan En Jie, Thevesh A/L Chandran and Lau Zheng Hao. Student leaders
+behind 50+ club events.
 
 ---
 

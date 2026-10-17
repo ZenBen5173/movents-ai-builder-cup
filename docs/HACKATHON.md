@@ -5,9 +5,9 @@ University: Teo Zen Ben, Jeanette Tan En Jie and Colin Leong Hong Seng.
 
 | | |
 |---|---|
-| **Presentation slides (PDF)** | [Movents-Pitch-Deck.pdf](Movents-Pitch-Deck.pdf) |
+| **Presentation slides (PDF)** | [Movents-Dormathon-Deck.pdf](dormathon/Movents-Dormathon-Deck.pdf) |
 | **Full pitch deck (Canva)** | [canva.link/iwsder9iekrtepe](https://canva.link/iwsder9iekrtepe) |
-| **Pitch video (1:30)** | [Movents-Pitch-Video.mp4](Movents-Pitch-Video.mp4) |
+| **Pitch video (1:30)** | [Movents-Dormathon-Video.mp4](dormathon/Movents-Dormathon-Video.mp4) |
 
 The hackathon build ran in a demo mode with seeded societies and an account switcher. That mode was replaced by real
 accounts, society workspaces and support for any MCP-capable AI assistant.
